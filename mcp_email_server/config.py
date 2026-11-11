@@ -40,7 +40,7 @@ from mcp_email_server.bootstrap import (
     read_bootstrap,
 )
 from mcp_email_server.imap_keywords import ImapKeywordAccount, ImapKeywordTag
-from mcp_email_server.log import logger
+from mcp_email_server.log import log_safe_failure, logger
 from mcp_email_server.windows_security import (
     atomic_write_private,
     ensure_private_parent,
@@ -553,7 +553,7 @@ class EmailSettings(AccountAttributes):
                 imap_id_mode=kwargs.get("imap_id_mode"),
             )
         except (ValueError, TypeError) as e:
-            logger.error(f"Failed to create email settings from environment variables: {e}")
+            log_safe_failure("Failed to create email settings from environment variables", e)
             return None
 
     @classmethod
@@ -587,7 +587,7 @@ class EmailSettings(AccountAttributes):
         try:
             spec = collect_account_kwargs("MCP_EMAIL_SERVER_")
         except (ValueError, TypeError) as e:
-            logger.error(f"Failed to create email settings from environment variables: {e}")
+            log_safe_failure("Failed to create email settings from environment variables", e)
             return None
         if spec is None:
             return None
