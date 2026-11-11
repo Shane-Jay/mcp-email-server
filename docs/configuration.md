@@ -865,8 +865,8 @@ values are treated as false. Do not add surrounding whitespace to these values.
 | `MCP_EMAIL_SERVER_SMTP_POOL`                        | `false`                                  | Optional SMTP connection reuse (off unless you opt in). |
 | `MCP_EMAIL_SERVER_POOL_IDLE_SECONDS`                | `60`                                     | Drop a pooled connection after this many idle seconds. |
 | `MCP_EMAIL_SERVER_ATTACHMENT_DIR`                   | unset                                    | When set, outgoing `attachments` paths must resolve inside this directory. |
-| `MCP_EMAIL_SERVER_TOOL_ALLOW`                       | unset                                    | Comma-separated tool names to advertise; unset means all minus denials. |
-| `MCP_EMAIL_SERVER_TOOL_DENY`                        | unset                                    | Extra tool names hidden from `tools/list`. `email_command` is hidden unless an account enables protocol commands. |
+| `MCP_EMAIL_SERVER_TOOL_ALLOW`                       | unset                                    | Comma-separated tool names to advertise **and call**; unset means all minus denials. An empty value exposes no tools. Denied or unlisted tools are omitted from `tools/list` and rejected at `tools/call`. |
+| `MCP_EMAIL_SERVER_TOOL_DENY`                        | unset                                    | Extra tool names hidden from `tools/list` **and uncallable**. `email_command` is hidden and rejected unless an account enables protocol commands. |
 | `MCP_EMAIL_CACHE_KEY`                               | unset                                    | Enables the AES-256-GCM local cache. Never put credentials in the cache. |
 | `MCP_EMAIL_CACHE_KEY_FILE`                          | unset                                    | Read the cache key from a secret file. |
 | `MCP_EMAIL_CACHE_DIR`                               | `$HOME/.cache/mcp-email-server`          | Directory for the encrypted SQLite cache. |

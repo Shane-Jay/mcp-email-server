@@ -27,12 +27,21 @@ and flags. JSON Schema counts characters while the application limits UTF-8
 bytes, so every application service independently revalidates direct and MCP
 callers; aggregate recipient and payload limits also remain application-owned.
 
+## Tool allow/deny lists
+
+`MCP_EMAIL_SERVER_TOOL_ALLOW` and `MCP_EMAIL_SERVER_TOOL_DENY` filter both
+`tools/list` and `tools/call`. A denied or unlisted name is omitted from the
+catalog and rejected at call time with `tool_unavailable`. An empty allowlist
+exposes no tools. `email_command` is denied by default; it is advertised and
+callable only when at least one account sets `allow_protocol_commands`.
+
 ## `email_command`: advanced protocol operations
 
 Use the focused tools for ordinary mail workflows. When a needed primitive is
 not wrapped—such as copying messages or renaming a mailbox—`email_command`
 runs a short IMAP or SMTP sequence on one automatically authenticated connection.
-All existing tools, including `create_mailbox`, remain available.
+It is hidden and uncallable unless an account opts in. All existing tools,
+including `create_mailbox`, remain available when they are not denied.
 
 Start with local help (no account, credentials, runtime setup or network):
 

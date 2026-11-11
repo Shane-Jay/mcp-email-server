@@ -50,6 +50,18 @@ def filter_tool_names(
     return [name for name in names if name in allowed and name not in deny_set]
 
 
+def tool_is_enabled(name: str, *, hide_protocol_command: bool = True) -> bool:
+    """Return whether ``name`` may appear in ``tools/list`` and be called."""
+
+    return bool(
+        filter_tool_names(
+            [name],
+            allow=configured_tool_allowlist(),
+            deny=configured_tool_denylist(hide_protocol_command=hide_protocol_command),
+        )
+    )
+
+
 def filter_mcp_tools(
     tools: Sequence[Any],
     *,

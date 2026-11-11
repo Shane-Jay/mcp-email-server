@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from mcp_email_server.app import reply_email, send_draft
+from mcp_email_server.app import reply_email, save_draft, send_draft
 from mcp_email_server.application.accounts import AvailableAccount
-from mcp_email_server.application.mutations import DeleteCommand
+from mcp_email_server.application.mutations import DeleteCommand, RecipientPolicyDeniedError
 from mcp_email_server.emails.models import EmailBodyResponse, EmailContentBatchResponse
 from mcp_email_server.reply_compose import (
     build_reply_body,
@@ -149,3 +150,60 @@ async def test_send_draft_tool_deletes_draft_after_clean_send():
     assert isinstance(command, DeleteCommand)
     assert command.email_ids == ("42",)
     assert command.mailbox == "Drafts"
+
+
+@pytest.mark.asyncio
+async def test_reply_email_enforces_recipient_allowlist():
+    batch = EmailContentBatchResponse(emails=[_body()], requested_count=1, retrieved_count=1, failed_ids=[])
+    account = AvailableAccount(
+        account_name="personal",
+        account_type="email",
+        description="personal",
+        email_address="me@example.test",
+        can_receive=True,
+        can_send=True,
+    )
+    with (
+        patch("mcp_email_server.app.get_email_content_query", AsyncMock(return_value=batch)),
+        patch("mcp_email_server.app.list_effective_accounts", return_value=[account]),
+        patch(
+            "mcp_email_server.app.send_email_command",
+            AsyncMock(side_effect=RecipientPolicyDeniedError("recipient policy denied one or more addresses")),
+        ),
+    ):
+        with pytest.raises(ValueError, match="not in allowlist"):
+            await reply_email(account_name="personal", email_id="42", body="Thanks")
+
+
+@pytest.mark.asyncio
+async def test_send_draft_enforces_recipient_allowlist_and_keeps_the_draft():
+    draft = _body()
+    draft.recipients = ["blocked@evil.test"]
+    batch = EmailContentBatchResponse(emails=[draft], requested_count=1, retrieved_count=1, failed_ids=[])
+    delete = AsyncMock()
+    with (
+        patch("mcp_email_server.app.get_email_content_query", AsyncMock(return_value=batch)),
+        patch(
+            "mcp_email_server.app.send_email_command",
+            AsyncMock(side_effect=RecipientPolicyDeniedError("recipient policy denied one or more addresses")),
+        ),
+        patch("mcp_email_server.app.delete_emails_command", delete),
+    ):
+        with pytest.raises(ValueError, match="not in allowlist"):
+            await send_draft(account_name="personal", email_id="42", mailbox="Drafts")
+    delete.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_save_draft_enforces_recipient_allowlist():
+    execute = AsyncMock(side_effect=RecipientPolicyDeniedError("recipient policy denied one or more addresses"))
+    runtime = SimpleNamespace(mutations=SimpleNamespace(save_draft=SimpleNamespace(execute=execute)))
+    with patch("mcp_email_server.app.get_application_runtime", return_value=runtime):
+        with pytest.raises(ValueError, match="not in allowlist"):
+            await save_draft(
+                account_name="personal",
+                subject="Draft",
+                body="Hello",
+                recipients=["blocked@evil.test"],
+            )
+    execute.assert_awaited_once()

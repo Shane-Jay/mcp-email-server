@@ -26,6 +26,13 @@ from mcp_email_server.config import Settings
 from mcp_email_server.managed import ManagedCatalog
 
 
+@pytest.fixture(autouse=True)
+def _advertise_protocol_commands_for_direct_calls(monkeypatch):
+    """Protocol-command tests opt in; production hides email_command unless advertised."""
+
+    monkeypatch.setattr(app_module, "_protocol_command_advertised", lambda: True)
+
+
 def request(*commands, protocol="imap", account_name="test_account"):
     return ProtocolRequest.model_validate({
         "account_name": account_name,

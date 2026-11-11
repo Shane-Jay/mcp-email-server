@@ -69,7 +69,7 @@ from mcp_email_server.reply_compose import (
     reply_subject,
 )
 from mcp_email_server.runtime import close_application_runtime, get_application_runtime
-from mcp_email_server.tool_filter import filter_mcp_tools
+from mcp_email_server.tool_filter import filter_mcp_tools, tool_is_enabled
 
 MAX_IMAP_UID_CHARACTERS = len(str(APPLICATION_LIMITS.maximum_imap_uid))
 UidInput = Annotated[str, Field(max_length=MAX_IMAP_UID_CHARACTERS, pattern=r"^[1-9][0-9]*$")]
@@ -289,6 +289,20 @@ async def _execute_protocol_request(request: ProtocolRequest) -> CallToolResult:
     return _protocol_tool_result(await service.execute(request))
 
 
+def _unavailable_tool_result() -> CallToolResult:
+    """Same bounded error for a denied, hidden, or never-advertised tool."""
+
+    return CallToolResult(
+        isError=True,
+        content=[TextContent(type="text", text="tool_unavailable: this tool is not enabled")],
+        structuredContent={"error": "tool_unavailable"},
+    )
+
+
+def _tool_enabled(name: str) -> bool:
+    return tool_is_enabled(name, hide_protocol_command=not _protocol_command_advertised())
+
+
 class EmailMCP(FastMCP):
     """Keep legacy coercion unchanged; raw protocol input must be lossless and strict."""
 
@@ -302,6 +316,8 @@ class EmailMCP(FastMCP):
         return filter_mcp_tools(tools, hide_protocol_command=hide_protocol)
 
     async def call_tool(self, name: str, arguments: dict[str, Any]):  # pyright: ignore[reportIncompatibleMethodOverride] - MCP supports CallToolResult, SDK annotation omits it
+        if not _tool_enabled(name):
+            return _unavailable_tool_result()
         if name != "email_command":
             return await super().call_tool(name, arguments)
         try:
@@ -1019,20 +1035,26 @@ async def save_draft(
         ),
     ] = None,
 ) -> str:
-    outcome = await get_application_runtime().mutations.save_draft.execute(
-        SaveDraftCommand(
-            account_name=account_name,
-            recipients=tuple(recipients or ()),
-            subject=subject,
-            body=body,
-            cc=tuple(cc or ()),
-            bcc=tuple(bcc or ()),
-            html=html,
-            attachments=tuple(attachments or ()),
-            in_reply_to=in_reply_to,
-            references=references,
+    try:
+        outcome = await get_application_runtime().mutations.save_draft.execute(
+            SaveDraftCommand(
+                account_name=account_name,
+                recipients=tuple(recipients or ()),
+                subject=subject,
+                body=body,
+                cc=tuple(cc or ()),
+                bcc=tuple(bcc or ()),
+                html=html,
+                attachments=tuple(attachments or ()),
+                in_reply_to=in_reply_to,
+                references=references,
+            )
         )
-    )
+    except RecipientPolicyDeniedError as exc:
+        raise ValueError(
+            "Recipient(s) not in allowlist; configure allowed recipients through the user-operated CLI/UI "
+            "before sending or saving. An empty allowlist denies all recipients."
+        ) from exc
     warning = "; warning: reconciliation needed" if outcome.reconciliation_needed else ""
     return f"Draft save [{outcome.status}: {outcome.mailbox}; Message-Id: {outcome.message_id}{warning}]"
 
