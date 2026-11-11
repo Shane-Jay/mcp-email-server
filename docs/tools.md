@@ -539,10 +539,21 @@ yields no threading headers rather than a fabricated one.
 
 ### `send_draft`
 
-Sends an existing draft by UID through `send_email`, then deletes the draft from
-its mailbox only when the send reports a clean success. Recipients come from the
+Sends an existing draft by UID through `send_email`. Recipients come from the
 draft's To header and still must match the recipient allowlist. Default mailbox
-is `Drafts`.
+is `Drafts`. After a clean send, `MCP_EMAIL_SERVER_SEND_DRAFT` chooses what
+happens to the original draft:
+
+| Value | Behaviour |
+| --- | --- |
+| `safe` (default) | Delete the draft only when this server successfully APPENDed a Sent copy. If Sent-copy is skipped or failed, keep the draft. |
+| `delete` | Always delete the draft after a clean send. |
+| `move` | Move the draft to Sent when no Sent copy was saved; if a Sent copy already succeeded, delete the draft instead of duplicating it. |
+| `keep` | Leave the draft in place. |
+
+Providers that auto-save Sent on SMTP submit should use `delete` (or `safe` plus
+`save_to_sent=true`) so the draft does not linger. A failed delete/move leaves
+the draft and logs a sanitized error.
 
 ### `save_draft`
 

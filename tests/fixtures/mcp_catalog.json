@@ -1632,7 +1632,7 @@
     },
     {
       "name": "send_draft",
-      "description": "Send an existing draft by email_id. The draft is read, submitted through send_email (recipient allowlist and Sent-copy still apply), then deleted from the drafts mailbox on a clean send.",
+      "description": "Send an existing draft by email_id. The draft is read and submitted through send_email (recipient allowlist and Sent-copy still apply). After a clean send, MCP_EMAIL_SERVER_SEND_DRAFT controls the draft: safe (default) deletes it only when a Sent copy was saved; delete always removes it; move relocates it to Sent when no Sent copy was saved; keep leaves it in place.",
       "inputSchema": {
         "properties": {
           "account_name": {

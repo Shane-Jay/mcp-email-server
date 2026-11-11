@@ -34,6 +34,7 @@ from mcp_email_server.application.mutations import (
     SaveToMailboxCommand,
     SendCommand,
     SendMutationOutcome,
+    SentCopyMutationOutcome,
     SetEmailFlagsCommand,
     SetEmailTagsCommand,
     TargetMutationOutcome,
@@ -52,6 +53,7 @@ from mcp_email_server.application.reads import (
     GetEmailContentQuery,
     ListMailboxesQuery,
 )
+from mcp_email_server.draft_disposition import configured_send_draft_disposition, draft_action_after_send
 from mcp_email_server.emails.models import (
     AttachmentDownloadResponse,
     CreateMailboxResult,
@@ -61,6 +63,7 @@ from mcp_email_server.emails.models import (
 )
 from mcp_email_server.http_auth import healthz
 from mcp_email_server.imap_keywords import ImapKeywordTag
+from mcp_email_server.log import log_provider_failure
 from mcp_email_server.reply_compose import (
     build_reply_body,
     build_thread_headers,
@@ -1140,10 +1143,41 @@ async def reply_email(
     )
 
 
+async def _dispose_sent_draft(
+    account_name: str,
+    email_id: str,
+    mailbox: str,
+    sent_copy: SentCopyMutationOutcome,
+) -> None:
+    """Apply MCP_EMAIL_SERVER_SEND_DRAFT after a clean send. Failures leave the draft."""
+
+    action = draft_action_after_send(configured_send_draft_disposition(), sent_copy)
+    try:
+        if action == "delete":
+            await delete_emails_command(DeleteCommand(account_name, (email_id,), mailbox))
+            return
+        if action == "move":
+            destination = sent_copy.mailbox or "Sent"
+            if destination.casefold() == mailbox.casefold():
+                return
+            await move_emails_command(
+                MoveCommand(
+                    account_name,
+                    (email_id,),
+                    mailbox,
+                    destination_mailbox=destination,
+                )
+            )
+    except Exception as exc:
+        log_provider_failure("send_draft could not remove the original draft", exc)
+
+
 @mcp.tool(
     description=(
-        "Send an existing draft by email_id. The draft is read, submitted through send_email "
-        "(recipient allowlist and Sent-copy still apply), then deleted from the drafts mailbox on a clean send."
+        "Send an existing draft by email_id. The draft is read and submitted through send_email "
+        "(recipient allowlist and Sent-copy still apply). After a clean send, MCP_EMAIL_SERVER_SEND_DRAFT "
+        "controls the draft: safe (default) deletes it only when a Sent copy was saved; delete always "
+        "removes it; move relocates it to Sent when no Sent copy was saved; keep leaves it in place."
     ),
     annotations=_NONDESTRUCTIVE_REMOTE_MUTATION,
 )
@@ -1169,22 +1203,34 @@ async def send_draft(
     source = original.emails[0]
     if not source.recipients:
         raise ValueError("Draft has no recipients; edit it before sending")
-    result = await send_email(
-        account_name=account_name,
-        recipients=list(source.recipients),
-        subject=source.subject,
-        body=source.body.replace("...[TRUNCATED]", ""),
-        cc=None,
-        bcc=None,
-        html=False,
-        attachments=None,
-        in_reply_to=source.in_reply_to,
-        references=source.references,
-        reply_to=None,
-    )
-    if result.startswith("Email sent successfully"):
-        await delete_emails_command(DeleteCommand(account_name, (email_id,), mailbox))
-    return result
+    try:
+        outcome = await send_email_command(
+            SendCommand(
+                account_name=account_name,
+                recipients=tuple(source.recipients),
+                subject=source.subject,
+                body=source.body.replace("...[TRUNCATED]", ""),
+                cc=(),
+                bcc=(),
+                html=False,
+                attachments=(),
+                in_reply_to=source.in_reply_to,
+                references=source.references,
+                reply_to=None,
+            )
+        )
+    except RecipientPolicyDeniedError as exc:
+        raise ValueError(
+            "Recipient(s) not in allowlist; configure allowed recipients through the user-operated CLI/UI "
+            "before sending or saving. An empty allowlist denies all recipients."
+        ) from exc
+    if _send_outcome_is_clean(outcome):
+        await _dispose_sent_draft(account_name, email_id, mailbox, outcome.sent_copy)
+        return (
+            f"Email sent successfully to {', '.join(source.recipients)}"
+            f"{_reported_message_id(outcome)}"
+        )
+    return f"Email delivery [{_tagged_send_result(outcome)}]"
 
 
 @mcp.tool(

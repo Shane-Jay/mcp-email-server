@@ -8,7 +8,14 @@ import pytest
 
 from mcp_email_server.app import reply_email, save_draft, send_draft
 from mcp_email_server.application.accounts import AvailableAccount
-from mcp_email_server.application.mutations import DeleteCommand, RecipientPolicyDeniedError
+from mcp_email_server.application.mutations import (
+    DeleteCommand,
+    MoveCommand,
+    RecipientPolicyDeniedError,
+    SendMutationOutcome,
+    SentCopyMutationOutcome,
+    TargetMutationOutcome,
+)
 from mcp_email_server.emails.models import EmailBodyResponse, EmailContentBatchResponse
 from mcp_email_server.reply_compose import (
     build_reply_body,
@@ -130,8 +137,15 @@ async def test_reply_email_tool_sets_thread_headers_and_reuses_send():
     assert "bob@example.test" in (kwargs["cc"] or [])
 
 
+def _clean_send(*, sent_copy: str = "succeeded") -> SendMutationOutcome:
+    return SendMutationOutcome(
+        (TargetMutationOutcome("ada@example.test", "succeeded"),),
+        SentCopyMutationOutcome(sent_copy, mailbox="Sent" if sent_copy == "succeeded" else None),
+    )
+
+
 @pytest.mark.asyncio
-async def test_send_draft_tool_deletes_draft_after_clean_send():
+async def test_send_draft_tool_deletes_draft_when_sent_copy_was_saved():
     draft = _body()
     draft.subject = "Draft subject"
     draft.recipients = ["ada@example.test"]
@@ -139,8 +153,9 @@ async def test_send_draft_tool_deletes_draft_after_clean_send():
     delete = AsyncMock()
     with (
         patch("mcp_email_server.app.get_email_content_query", AsyncMock(return_value=batch)),
-        patch("mcp_email_server.app.send_email", AsyncMock(return_value="Email sent successfully [id: 1]")) as send,
+        patch("mcp_email_server.app.send_email_command", AsyncMock(return_value=_clean_send())) as send,
         patch("mcp_email_server.app.delete_emails_command", delete),
+        patch("mcp_email_server.app.move_emails_command", AsyncMock()),
     ):
         result = await send_draft(account_name="personal", email_id="42", mailbox="Drafts")
     assert result.startswith("Email sent successfully")
@@ -150,6 +165,86 @@ async def test_send_draft_tool_deletes_draft_after_clean_send():
     assert isinstance(command, DeleteCommand)
     assert command.email_ids == ("42",)
     assert command.mailbox == "Drafts"
+
+
+@pytest.mark.asyncio
+async def test_send_draft_safe_mode_keeps_draft_without_sent_copy(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.delenv("MCP_EMAIL_SERVER_SEND_DRAFT", raising=False)
+    draft = _body()
+    draft.recipients = ["ada@example.test"]
+    batch = EmailContentBatchResponse(emails=[draft], requested_count=1, retrieved_count=1, failed_ids=[])
+    delete = AsyncMock()
+    move = AsyncMock()
+    with (
+        patch("mcp_email_server.app.get_email_content_query", AsyncMock(return_value=batch)),
+        patch("mcp_email_server.app.send_email_command", AsyncMock(return_value=_clean_send(sent_copy="skipped"))),
+        patch("mcp_email_server.app.delete_emails_command", delete),
+        patch("mcp_email_server.app.move_emails_command", move),
+    ):
+        result = await send_draft(account_name="personal", email_id="42", mailbox="Drafts")
+    assert result.startswith("Email sent successfully")
+    delete.assert_not_awaited()
+    move.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_send_draft_delete_mode_always_deletes(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("MCP_EMAIL_SERVER_SEND_DRAFT", "delete")
+    draft = _body()
+    draft.recipients = ["ada@example.test"]
+    batch = EmailContentBatchResponse(emails=[draft], requested_count=1, retrieved_count=1, failed_ids=[])
+    delete = AsyncMock()
+    with (
+        patch("mcp_email_server.app.get_email_content_query", AsyncMock(return_value=batch)),
+        patch("mcp_email_server.app.send_email_command", AsyncMock(return_value=_clean_send(sent_copy="skipped"))),
+        patch("mcp_email_server.app.delete_emails_command", delete),
+        patch("mcp_email_server.app.move_emails_command", AsyncMock()),
+    ):
+        await send_draft(account_name="personal", email_id="42", mailbox="Drafts")
+    delete.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_send_draft_move_mode_moves_when_no_sent_copy(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("MCP_EMAIL_SERVER_SEND_DRAFT", "move")
+    draft = _body()
+    draft.recipients = ["ada@example.test"]
+    batch = EmailContentBatchResponse(emails=[draft], requested_count=1, retrieved_count=1, failed_ids=[])
+    delete = AsyncMock()
+    move = AsyncMock()
+    with (
+        patch("mcp_email_server.app.get_email_content_query", AsyncMock(return_value=batch)),
+        patch("mcp_email_server.app.send_email_command", AsyncMock(return_value=_clean_send(sent_copy="skipped"))),
+        patch("mcp_email_server.app.delete_emails_command", delete),
+        patch("mcp_email_server.app.move_emails_command", move),
+    ):
+        await send_draft(account_name="personal", email_id="42", mailbox="Drafts")
+    delete.assert_not_awaited()
+    move.assert_awaited_once()
+    command = move.await_args.args[0]
+    assert isinstance(command, MoveCommand)
+    assert command.email_ids == ("42",)
+    assert command.source_mailbox == "Drafts"
+    assert command.destination_mailbox == "Sent"
+
+
+@pytest.mark.asyncio
+async def test_send_draft_keep_mode_leaves_draft(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("MCP_EMAIL_SERVER_SEND_DRAFT", "keep")
+    draft = _body()
+    draft.recipients = ["ada@example.test"]
+    batch = EmailContentBatchResponse(emails=[draft], requested_count=1, retrieved_count=1, failed_ids=[])
+    delete = AsyncMock()
+    move = AsyncMock()
+    with (
+        patch("mcp_email_server.app.get_email_content_query", AsyncMock(return_value=batch)),
+        patch("mcp_email_server.app.send_email_command", AsyncMock(return_value=_clean_send())),
+        patch("mcp_email_server.app.delete_emails_command", delete),
+        patch("mcp_email_server.app.move_emails_command", move),
+    ):
+        await send_draft(account_name="personal", email_id="42", mailbox="Drafts")
+    delete.assert_not_awaited()
+    move.assert_not_awaited()
 
 
 @pytest.mark.asyncio
