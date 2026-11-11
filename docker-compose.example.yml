@@ -33,7 +33,10 @@ services:
       - mcp-email-cache:/data/cache
       - mcp-email-attachments:/data/attachments
     tmpfs:
-      - /tmp
+      - /tmp:uid=1000,gid=1000,mode=1777
+    # Named volumes are created root-owned; they must be writable by uid 1000
+    # (Synology: Control Panel → Shared Folder, or `chown -R 1000:1000` on the
+    # volume). Env-only mode does not require a config.toml inside /data.
     security_opt:
       - no-new-privileges:true
     cap_drop:

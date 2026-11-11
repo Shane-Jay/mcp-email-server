@@ -21,7 +21,8 @@ Do not put real credentials, tokens, or personal paths in git. Copy
 5. In Container Manager: **Project** → create from the folder that contains
    `docker-compose.yml`, or from SSH: `docker compose up -d --build`.
 6. Confirm the container is user `1000:1000`, `read_only: true`, and healthy
-   (`/healthz`).
+   (`/healthz`). Named volumes for `/data` must be writable by uid 1000
+   (`chown -R 1000:1000` on the volume, or Synology shared-folder permissions).
 7. Point the MCP client at `http://<MagicDNS-or-LAN>:9557/mcp` with
    `Authorization: Bearer <token>` over Tailscale or WireGuard only.
 
@@ -34,7 +35,7 @@ in this container.
 4. `cp docker-compose.example.yml docker-compose.yml`
 5. 打开套件中心 **Container Manager** → **项目**，用该目录创建；或 SSH 执行
    `docker compose up -d --build`。
-6. 确认容器以 `1000:1000` 运行、根文件系统只读、`/healthz` 健康。
+6. 确认容器以 `1000:1000` 运行、根文件系统只读、`/healthz` 健康。`/data` 数据卷必须对 uid 1000 可写。
 7. 只在 Tailscale / WireGuard 内网把 MCP 客户端指到
    `http://<MagicDNS 或局域网>:9557/mcp`，请求头 `Authorization: Bearer <令牌>`。
 
@@ -196,6 +197,7 @@ rows in process; it works while the cache is encrypted.
 | `tool_unavailable` | Tool is denied (`MCP_EMAIL_SERVER_TOOL_DENY` / allowlist) or `email_command` without `allow_protocol_commands`. |
 | Send / reply / forward denied | Empty recipient allowlist denies all. Set `MCP_EMAIL_SERVER_ALLOWED_RECIPIENTS`. |
 | Attachment path rejected | Outgoing files must sit inside `MCP_EMAIL_SERVER_ATTACHMENT_DIR`. Forwarded IMAP parts are not subject to that directory. |
+| Draft still in Drafts after send_draft | Default `MCP_EMAIL_SERVER_SEND_DRAFT=safe` keeps the draft unless a Sent copy was saved. Set `delete` or enable `save_to_sent`. |
 | Cache search empty after key change | Wipe the cache; old ciphertext cannot be read with a new key. |
 | Read-only root FS write errors | Data belongs on `/data` and `/tmp` (tmpfs). Do not write under `/app`. |
 
@@ -207,6 +209,7 @@ rows in process; it works while the cache is encrypted.
 | 163 能 LOGIN 随后失败 | 保持 `PRESET=163`（始终发 IMAP ID）。 |
 | 163 SEARCH 为空 | 预期行为；用本地搜索 + 加密缓存。 |
 | `tool_unavailable` | 工具被 allow/deny 排除，或未给账号打开 `email_command`。 |
+| send_draft 后草稿还在 | 默认 `MCP_EMAIL_SERVER_SEND_DRAFT=safe`：只有成功写入已发送时才删草稿。需要的话设 `delete` 或打开 `save_to_sent`。 |
 | 发信/回复/转发被拒 | 空收件人白名单默认拒绝。设置 `MCP_EMAIL_SERVER_ALLOWED_RECIPIENTS`。 |
 | 附件路径被拒 | 本地附件必须在 `MCP_EMAIL_SERVER_ATTACHMENT_DIR` 内。转发原信的 IMAP 附件不受该目录限制。 |
 | 换密钥后缓存搜索为空 | 清空缓存；旧密文不能用新密钥读。 |
