@@ -1,0 +1,75 @@
+name: Unit tests and GreenMail E2E
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*", "[0-9]*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out
+        uses: actions/checkout@v6
+
+      - name: Set up the environment
+        uses: ./.github/actions/setup-python-env
+
+      - name: Run unit and fake-IMAP tests
+        run: uv run python -m pytest tests --cov --cov-config=pyproject.toml --cov-report=xml
+
+  greenmail-e2e:
+    name: GreenMail E2E (service container)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      greenmail:
+        image: greenmail/standalone:2.1.11
+        env:
+          GREENMAIL_OPTS: >-
+            -Dgreenmail.setup.test.smtp
+            -Dgreenmail.setup.test.imap
+            -Dgreenmail.hostname=0.0.0.0
+            -Dgreenmail.users=alice:alice-password@example.test,bob:bob-password@example.test
+            -Dgreenmail.users.login=email
+        ports:
+          - 3025:3025
+          - 3143:3143
+        options: >-
+          --health-cmd "true"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 12
+    steps:
+      - name: Check out
+        uses: actions/checkout@v6
+
+      - name: Set up the environment
+        uses: ./.github/actions/setup-python-env
+
+      - name: Wait for GreenMail SMTP
+        run: |
+          python3 - <<'PY'
+          import socket, time
+          deadline = time.time() + 60
+          while time.time() < deadline:
+              try:
+                  with socket.create_connection(("127.0.0.1", 3025), 2):
+                      raise SystemExit(0)
+              except OSError:
+                  time.sleep(1)
+          raise SystemExit("GreenMail SMTP did not become ready")
+          PY
+
+      - name: Run GreenMail e2e tests
+        env:
+          MCP_EMAIL_SERVER_E2E_SMTP_PORT: "3025"
+          MCP_EMAIL_SERVER_E2E_IMAP_PORT: "3143"
+        run: uv run pytest -o addopts= -m e2e tests/e2e -q --tb=short

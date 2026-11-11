@@ -278,6 +278,8 @@ def test_distribution_is_node_free_and_embeds_reproducible_ui(tmp_path: Path) ->
         ".github/actions/setup-python-env/action.yml",
         ".github/workflows/main.yml",
         ".github/workflows/on-release-main.yml",
+        ".github/workflows/publish-image.yml",
+        ".github/workflows/unit-and-e2e.yml",
         ".pre-commit-config.yaml",
         "codecov.yaml",
         "Dockerfile",
