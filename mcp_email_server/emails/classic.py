@@ -95,7 +95,7 @@ from mcp_email_server.emails.models import (
     EmailMetadataPageResponse,
     MailboxInfo,
 )
-from mcp_email_server.log import log_safe_failure, logger
+from mcp_email_server.log import log_provider_failure, log_safe_failure, logger
 
 # GB2312 labels decode as GB18030, including in encoded-word headers (see charsets).
 charsets.install_gb2312_superset_aliases()
@@ -2861,8 +2861,8 @@ class EmailClient:
                 if data and len(data) > 0 and self._check_email_content(data):
                     return data
 
-            except Exception as e:
-                logger.debug(f"Fetch format {fetch_format} failed: {e}")
+            except Exception as exc:
+                logger.debug("Fetch format {} failed ({})", fetch_format, type(exc).__name__)
 
         return None
 
@@ -2915,7 +2915,7 @@ class EmailClient:
                 )
                 email_data["_flags"] = self._extract_message_flags(data)
             except Exception as e:
-                logger.error(f"Error parsing email: {e!s}")
+                log_provider_failure("Error parsing email", e)
                 return None
 
             # Marking is intentionally owned by the application mutation
@@ -3105,7 +3105,7 @@ class EmailClient:
             except Exception as error:
                 # The public message stays fixed-shape: parser exception text can
                 # embed fragments of the offending header or payload.
-                logger.error(f"Could not parse email {email_id} for forwarding: {error}")
+                log_provider_failure(f"Could not parse email {email_id} for forwarding", error)
                 msg = f"Could not parse email {email_id} for forwarding"
                 raise ValueError(msg) from error
 
@@ -3203,7 +3203,7 @@ class EmailClient:
                 attachment_part = self._create_attachment_part(path, file_data)
                 msg.attach(attachment_part)
             except Exception as e:
-                logger.error(f"Failed to attach file {file_path}: {e}")
+                log_provider_failure("Failed to attach file", e)
                 raise
 
         # Forwarded parts arrive already bounded by the source-read size limit and
@@ -3649,8 +3649,8 @@ class EmailClient:
                 if any(flag.casefold() == r"\sent" for flag in mailbox.flags):
                     logger.info(f"Found Sent folder by \\Sent flag: '{mailbox.name}'")
                     return mailbox.name
-        except Exception as e:
-            logger.debug(f"Error finding Sent folder by flag: {e}")
+        except Exception as exc:
+            logger.debug("Error finding Sent folder by flag ({})", type(exc).__name__)
 
         return None
 
@@ -3861,7 +3861,7 @@ class EmailClient:
         except ConnectionError:
             raise
         except Exception as e:
-            logger.error(f"Error saving to mailbox '{mailbox}': {e}")
+            log_provider_failure(f"Error saving to mailbox '{mailbox}'", e)
             return None
         finally:
             try:
@@ -4314,14 +4314,14 @@ class EmailClient:
                         deleted_ids.append(email_id)
                         expunge_ids.append(email_id)
                     except Exception as e:
-                        logger.error(f"Failed to delete email {email_id}: {e}")
+                        log_provider_failure(f"Failed to delete email {email_id}", e)
                         failed_ids.append(email_id)
 
                 if expunge_ids:
                     try:
                         await _uid_expunge(imap, expunge_ids, "UID EXPUNGE deleted emails")
                     except Exception as e:
-                        logger.error(f"Failed to expunge deleted emails: {e}")
+                        log_provider_failure("Failed to expunge deleted emails", e)
                         expunge_set = set(expunge_ids)
                         failed_ids.extend(expunge_ids)
                         deleted_ids = [email_id for email_id in deleted_ids if email_id not in expunge_set]
@@ -4370,7 +4370,7 @@ class EmailClient:
                     _raise_for_imap_error(store_response, f"STORE \\Seen for email {email_id}")
                     marked_ids.append(email_id)
                 except Exception as e:
-                    logger.error(f"Failed to mark email {email_id} as read: {e}")
+                    log_provider_failure(f"Failed to mark email {email_id} as read", e)
                     failed_ids.append(email_id)
         finally:
             try:
@@ -4433,14 +4433,14 @@ class EmailClient:
                             copied.append(email_id)
                         moved_ids.append(email_id)
                     except Exception as e:
-                        logger.error(f"Failed to move email {email_id}: {e}")
+                        log_provider_failure(f"Failed to move email {email_id}", e)
                         failed_ids.append(email_id)
 
                 if copied:
                     try:
                         await _uid_expunge(imap, copied, "UID EXPUNGE moved emails")
                     except Exception as e:
-                        logger.error(f"Failed to expunge moved emails: {e}")
+                        log_provider_failure("Failed to expunge moved emails", e)
                         copied_set = set(copied)
                         failed_ids.extend(copied)
                         moved_ids = [uid for uid in moved_ids if uid not in copied_set]
@@ -4805,7 +4805,7 @@ class ClassicEmailHandler(EmailHandler):
                     )
                 )
             except Exception as e:
-                logger.error(f"Failed to retrieve email {email_id}: {e}")
+                log_provider_failure(f"Failed to retrieve email {email_id}", e)
                 failed_ids.append(email_id)
 
         return EmailContentBatchResponse(
@@ -4849,7 +4849,7 @@ class ClassicEmailHandler(EmailHandler):
                     self.sent_folder_name,
                 )
             except Exception as e:
-                logger.error(f"Failed to save email to Sent folder: {e}", exc_info=True)
+                log_provider_failure("Failed to save email to Sent folder", e)
 
     async def save_to_mailbox(
         self,

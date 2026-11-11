@@ -158,6 +158,19 @@ def test_resolve_config_path_honors_explicit_override(monkeypatch, tmp_path):
     assert not config_path.exists()
 
 
+def test_resolve_config_path_treats_unreadable_parent_as_absent(monkeypatch, tmp_path):
+    locked = tmp_path / "locked"
+    locked.mkdir()
+    override_path = locked / "config.toml"
+    expected = Path(os.path.abspath(override_path))
+    monkeypatch.setenv("MCP_EMAIL_SERVER_CONFIG_PATH", str(override_path))
+    locked.chmod(0o000)
+    try:
+        assert config_module._resolve_config_path() == expected
+    finally:
+        locked.chmod(0o700)
+
+
 def test_resolve_config_path_falls_back_when_copy_fails(monkeypatch, tmp_path):
     legacy_path = tmp_path / "legacy.toml"
     config_path = tmp_path / "current" / "config.toml"

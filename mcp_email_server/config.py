@@ -40,7 +40,7 @@ from mcp_email_server.bootstrap import (
     read_bootstrap,
 )
 from mcp_email_server.imap_keywords import ImapKeywordAccount, ImapKeywordTag
-from mcp_email_server.log import log_safe_failure, logger
+from mcp_email_server.log import log_provider_failure, log_safe_failure, logger, register_secret
 from mcp_email_server.windows_security import (
     atomic_write_private,
     ensure_private_parent,
@@ -315,21 +315,40 @@ def _copy_legacy_config_no_clobber(legacy_path: Path, config_path: Path) -> bool
             temporary_path.unlink()
 
 
+def _path_is_present(path: Path) -> bool:
+    """Return whether ``path`` exists without raising on an unreadable parent.
+
+    Env-only Docker/NAS setups point ``MCP_EMAIL_SERVER_CONFIG_PATH`` at
+    ``/data/config.toml``. A read-only root or root-owned volume can make
+    ``exists()`` raise ``PermissionError`` in Python 3.13+; treat that as absent
+    so import still succeeds and accounts load from the environment.
+    """
+
+    try:
+        return path.exists() or path.is_symlink()
+    except OSError:
+        return False
+
+
 def _resolve_config_path() -> Path:
     """Resolve config and migrate the old legacy default without managed side effects."""
     configured_path = os.getenv("MCP_EMAIL_SERVER_CONFIG_PATH")
     if configured_path:
         config_path = Path(os.path.abspath(Path(configured_path).expanduser()))
-        if config_path.exists() or config_path.is_symlink():
+        if _path_is_present(config_path):
             read_bootstrap(config_path)
         return config_path
 
     config_path = Path(os.path.abspath(Path(DEFAULT_CONFIG_PATH).expanduser()))
     legacy_path = Path(os.path.abspath(Path(LEGACY_CONFIG_PATH).expanduser()))
-    if config_path.exists() or config_path.is_symlink():
+    if _path_is_present(config_path):
         read_bootstrap(config_path)
         return config_path
-    if not legacy_path.is_file():
+    try:
+        legacy_is_file = legacy_path.is_file()
+    except OSError:
+        legacy_is_file = False
+    if not legacy_is_file:
         return config_path
 
     # Parse before mkdir/temp/link. An explicitly managed bootstrap remains at
@@ -344,7 +363,7 @@ def _resolve_config_path() -> Path:
     except OSError as exc:
         if config_path.exists():
             return config_path
-        logger.warning(f"Could not migrate config from {legacy_path} to {config_path}: {exc}")
+        log_provider_failure(f"Could not migrate config from {legacy_path} to {config_path}", exc)
         return legacy_path
 
     logger.info(f"Migrated config from {legacy_path} to {config_path}")
@@ -368,6 +387,11 @@ class EmailServer(BaseModel):
         if info.context and info.context.get("secrets") == "keyring":
             return keyring_store.SENTINEL
         return v.get_secret_value()
+
+    @model_validator(mode="after")
+    def _register_configured_password(self) -> EmailServer:
+        register_secret(self.password.get_secret_value())
+        return self
 
     def masked(self) -> EmailServer:
         return self.model_copy(update={"password": SecretStr("********")})

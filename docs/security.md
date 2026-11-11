@@ -125,9 +125,14 @@ exception text and chains, source lines, filesystem paths, and frame locals,
 including when a Loguru sink enables diagnostic tracebacks. Batch failures use
 the same redacted format when keeping a partial snapshot.
 
-HTTP bearer tokens, cache keys, and `PASSWORD`/`TOKEN`/`SECRET` environment
-values that are at least 8 characters are stripped from Loguru messages
-(`[redacted]`). `log_safe_failure` never attaches exception text. The encrypted
+HTTP bearer tokens, cache keys, and configured account passwords are registered
+for exact-value redaction regardless of length. Heuristic scanning of other
+`PASSWORD`/`TOKEN`/`SECRET` environment values still requires eight characters
+so tokens like `true` are not stripped. IMAP/SMTP failures log the exception
+type and a sanitized message (LOGIN/AUTH arguments, SASL blobs, Authorization
+headers, and message bodies stripped). Python tracebacks stay off unless
+`MCP_EMAIL_SERVER_LOG_TRACEBACKS=true`, which can expose frame locals. `log_safe_failure`
+never attaches exception text. The encrypted
 cache SQLite index stores HMAC-SHA256 tokens for account and mailbox names;
 subjects and addresses exist only inside AES-GCM ciphertext. The cache key itself
 is never logged. Outgoing `attachments` paths are `resolve(strict=True)` then

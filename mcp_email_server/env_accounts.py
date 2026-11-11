@@ -10,7 +10,7 @@ from __future__ import annotations
 import os
 from typing import Any
 
-from mcp_email_server.log import logger
+from mcp_email_server.log import log_safe_failure, logger
 from mcp_email_server.provider_presets import ProviderPreset, get_provider_preset, normalize_preset_name
 from mcp_email_server.secrets_io import read_secret_from_env
 
@@ -55,7 +55,7 @@ def collect_account_kwargs(prefix: str, *, account_name: str | None = None) -> d
     try:
         return _collect_account_kwargs(prefix, account_name=account_name)
     except (ValueError, TypeError) as exc:
-        logger.error(f"Failed to parse email account environment variables: {exc}")
+        log_safe_failure("Failed to parse email account environment variables", exc)
         return None
 
 
