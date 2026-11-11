@@ -51,3 +51,33 @@ def test_traversal_tokens_cannot_leave_allowlist(tmp_path: Path, monkeypatch: py
     monkeypatch.setenv("MCP_EMAIL_SERVER_ATTACHMENT_DIR", str(allowed))
     with pytest.raises((AttachmentPathError, FileNotFoundError)):
         resolve_allowed_attachment_path(str(allowed / ".." / "nope.txt"))
+
+
+def test_existing_parent_file_cannot_escape_allowlist(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    allowed = tmp_path / "allowed"
+    allowed.mkdir()
+    (allowed / "ok.txt").write_text("ok", encoding="utf-8")
+    secret = tmp_path / "secret.txt"
+    secret.write_text("classified", encoding="utf-8")
+    monkeypatch.setenv("MCP_EMAIL_SERVER_ATTACHMENT_DIR", str(allowed))
+    with pytest.raises(AttachmentPathError):
+        resolve_allowed_attachment_path(str(allowed / ".." / "secret.txt"))
+    with pytest.raises(AttachmentPathError):
+        resolve_allowed_attachment_path(str(secret))
+
+
+def test_symlink_directory_escape_is_blocked(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    allowed = tmp_path / "allowed"
+    allowed.mkdir()
+    outside_dir = tmp_path / "outside"
+    outside_dir.mkdir()
+    target = outside_dir / "file.txt"
+    target.write_text("x", encoding="utf-8")
+    link = allowed / "elsewhere"
+    try:
+        link.symlink_to(outside_dir)
+    except OSError:
+        pytest.skip("symlinks are not available")
+    monkeypatch.setenv("MCP_EMAIL_SERVER_ATTACHMENT_DIR", str(allowed))
+    with pytest.raises(AttachmentPathError):
+        resolve_allowed_attachment_path(str(link / "file.txt"))

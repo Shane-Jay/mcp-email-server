@@ -18,6 +18,7 @@ nav:
   - Security: security.md
   - Guides: guides.md
   - Troubleshooting: troubleshooting.md
+  - Operations: OPERATIONS.md
   - Contributing: https://github.com/Wh1isper/mcp-email-server/blob/main/CONTRIBUTING.md
 
 plugins:

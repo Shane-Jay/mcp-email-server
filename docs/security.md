@@ -125,6 +125,18 @@ exception text and chains, source lines, filesystem paths, and frame locals,
 including when a Loguru sink enables diagnostic tracebacks. Batch failures use
 the same redacted format when keeping a partial snapshot.
 
+HTTP bearer tokens, cache keys, and `PASSWORD`/`TOKEN`/`SECRET` environment
+values that are at least 8 characters are stripped from Loguru messages
+(`[redacted]`). `log_safe_failure` never attaches exception text. The encrypted
+cache SQLite index stores HMAC-SHA256 tokens for account and mailbox names;
+subjects and addresses exist only inside AES-GCM ciphertext. The cache key itself
+is never logged. Outgoing `attachments` paths are `resolve(strict=True)` then
+`relative_to` the allowlist directory, so `..`, absolute paths, and symlinks that
+leave the directory are rejected. Forwarded IMAP parts are attached from memory
+and are not subject to that directory. Recipient allowlist checks apply to
+`send_email`, `reply_email`, `forward_email`, `save_draft`, and `send_draft`.
+Denied MCP tools are omitted from `tools/list` and rejected at `tools/call`.
+
 ## Managed credential storage
 
 Managed mode never falls back to TOML plaintext. Its default managed secret

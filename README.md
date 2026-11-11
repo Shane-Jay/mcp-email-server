@@ -38,8 +38,11 @@ paths in git.
   Upstream `forward_email` and `save_draft` are unchanged.
 - Outgoing attachments may only be read from `MCP_EMAIL_SERVER_ATTACHMENT_DIR`
   when that directory is set (symlink-resolved, traversal blocked).
-- Tool allow/deny lists. `email_command` is hidden unless an account sets
-  `allow_protocol_commands`. Empty recipient allowlist still denies sending.
+- Tool allow/deny lists (`MCP_EMAIL_SERVER_TOOL_ALLOW` /
+  `MCP_EMAIL_SERVER_TOOL_DENY`). Denied or unlisted tools are omitted from
+  `tools/list` **and** rejected at `tools/call`. `email_command` is hidden and
+  uncallable unless an account sets `allow_protocol_commands`. Empty recipient
+  allowlist still denies sending (including reply / forward / drafts).
 - Provider presets: `163`, `126`, `aliyun`, `icloud`, `qq`, `tsinghua`.
 
 ## Quick start (Docker on a NAS)
@@ -54,7 +57,9 @@ docker compose up -d
 ```
 
 The container listens on port **9557** (`/mcp` Streamable HTTP, `/healthz`
-unauthenticated liveness). Point the MCP client at
+unauthenticated liveness). Set `MCP_ALLOWED_HOSTS` to the Tailscale MagicDNS
+name, tailnet IP, and LAN `host:port` the client will send (loopback is always
+kept for the healthcheck). Point the MCP client at
 `http://<tailscale-name>:9557/mcp` with header
 `Authorization: Bearer <token>`.
 
@@ -114,11 +119,13 @@ make test-e2e      # optional GreenMail container suite
 ## 中文快速开始
 
 在群晖 Docker 上复制 `env.example` 为 `.env`（权限 `600`），填入 HTTP Bearer
-令牌、缓存密钥、收件人白名单，以及 163 / 阿里云企业邮 / iCloud 等账号（163
-使用 16 位授权码，不是网页密码）。`docker compose -f docker-compose.example.yml
-up -d` 后，只在 Tailscale/WireGuard 内网把 MCP 客户端指到
-`http://<主机>:9557/mcp`，请求头 `Authorization: Bearer <令牌>`。不要把管理 UI
-或 9557 端口暴露到公网。空的收件人白名单默认禁止发信。
+令牌、缓存密钥、`MCP_ALLOWED_HOSTS`（MagicDNS / tailnet IP / 局域网 IP:端口）、
+收件人白名单，以及 163 / 阿里云企业邮 / iCloud 等账号（163 使用 16 位授权码，
+不是网页密码）。完整步骤见 [docs/OPERATIONS.md](docs/OPERATIONS.md)。
+`docker compose -f docker-compose.example.yml up -d` 后，只在
+Tailscale/WireGuard 内网把 MCP 客户端指到 `http://<主机>:9557/mcp`，请求头
+`Authorization: Bearer <令牌>`。不要把管理 UI 或 9557 端口暴露到公网。空的收件人
+白名单默认禁止发信（含回复、转发、草稿）。
 
 ## Documentation
 
@@ -128,6 +135,7 @@ up -d` 后，只在 Tailscale/WireGuard 内网把 MCP 客户端指到
 - [MCP Tools](docs/tools.md)
 - [Transports](docs/transports.md)
 - [Security](docs/security.md)
+- [Operations (EN/中文)](docs/OPERATIONS.md) — Synology deploy, token rotation, 163 / Aliyun / iCloud auth codes
 
 Upstream project documentation:
 [https://mcp-email-server.wh1isper.top/](https://mcp-email-server.wh1isper.top/).

@@ -15,6 +15,7 @@ from email.policy import SMTP as SMTP_POLICY
 from email.policy import SMTPUTF8 as SMTPUTF8_POLICY
 from email.policy import default
 from email.utils import make_msgid
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -1236,6 +1237,29 @@ class TestNormalizeForwardedPart:
 
 class TestForwardedPartSerialization:
     """Re-attached parts must reach the wire identically on every send path."""
+
+    def test_imap_forwarded_parts_bypass_attachment_dir_allowlist(
+        self, email_client, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        allowed = tmp_path / "empty-allow"
+        allowed.mkdir()
+        monkeypatch.setenv("MCP_EMAIL_SERVER_ATTACHMENT_DIR", str(allowed))
+        part = MIMEApplication(b"imap-bytes-not-from-disk", Name="photo.jpg")
+        part.add_header("Content-Disposition", "attachment", filename="photo.jpg")
+        with patch(
+            "mcp_email_server.emails.classic.resolve_allowed_attachment_path",
+            side_effect=AssertionError("IMAP parts must not use the attachment-dir allowlist"),
+        ):
+            message = email_client.compose_message(
+                ["dest@example.com"],
+                "Fwd: Photo",
+                "---------- Forwarded message ----------\nFrom: Ada\nRecipients: Me\nSubject: Photo\n\nHi",
+                extra_parts=[part],
+            )
+        payloads = [
+            item.get_payload(decode=True) for item in message.walk() if item.get_filename() == "photo.jpg"
+        ]
+        assert b"imap-bytes-not-from-disk" in payloads
 
     def test_rfc2231_filename_bytes_are_identical_across_send_paths(self, email_client):
         """The unfolded RFC 2231 disposition refolds the same way everywhere."""
