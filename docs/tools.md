@@ -509,6 +509,32 @@ providers. An internationalized Sent copy additionally requires RFC 6855
 `ENABLE` plus `UTF8=ACCEPT` or `UTF8=ONLY`; unsupported negotiation is reported
 as `utf8-append-unsupported` without changing the successful SMTP outcome.
 
+### `reply_email`
+
+Replies to an existing message through `send_email`, so recipient allowlist,
+attachments, Sent-copy, and mutation grants stay the same.
+
+| Parameter      | Default  | Description                                                                 |
+| -------------- | -------- | --------------------------------------------------------------------------- |
+| `account_name` | Required | Configured account identifier.                                              |
+| `email_id`     | Required | UID of the message to reply to.                                             |
+| `body`         | Required | Reply text placed above a quoted original (plain text unless `html=true`).  |
+| `mailbox`      | `INBOX`  | Mailbox containing the original.                                            |
+| `reply_all`    | `false`  | If true, CC original To/Cc recipients except this account.                  |
+| `cc` / `bcc`   | None     | Extra recipients; still filtered by the allowlist.                          |
+| `attachments`  | None     | Extra local files from the attachment allowlist directory when configured.  |
+
+The subject is `Re: <original>` without stacking a second `Re:`. `In-Reply-To`
+and `References` are set from the original Message-ID. A missing Message-ID
+yields no threading headers rather than a fabricated one.
+
+### `send_draft`
+
+Sends an existing draft by UID through `send_email`, then deletes the draft from
+its mailbox only when the send reports a clean success. Recipients come from the
+draft's To header and still must match the recipient allowlist. Default mailbox
+is `Drafts`.
+
 ### `save_draft`
 
 Composes and saves a draft without SMTP. It requires `draft`, not `append`.

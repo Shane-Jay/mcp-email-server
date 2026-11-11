@@ -32,6 +32,11 @@ class ApplicationRuntime:
 
     async def aclose(self) -> None:
         """Close process-scoped resources and remove private result artifacts."""
+        from mcp_email_server.connection_pool import close_connection_pools
+        from mcp_email_server.encrypted_cache import close_encrypted_cache
+
+        await close_connection_pools()
+        close_encrypted_cache()
         if self.large_results is not None:
             await self.large_results.aclose()
 

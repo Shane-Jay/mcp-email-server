@@ -1,0 +1,6 @@
+This tree includes source from mcp-email-server
+(https://github.com/Wh1isper/mcp-email-server), Copyright (c) 2025-2026
+wh1isper, licensed under the BSD 3-Clause License. See LICENSE.
+
+Local additions and packaging for self-hosted multi-account NAS deployment
+are provided under the same BSD 3-Clause terms unless a file says otherwise.

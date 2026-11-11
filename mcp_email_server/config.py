@@ -129,6 +129,8 @@ def resolve_imap_non_ascii_search(
 
 ImapSearchMode = Literal["server", "local"]
 _IMAP_SEARCH_MODES = frozenset({"server", "local"})
+ImapIdMode = Literal["auto", "always", "never"]
+_IMAP_ID_MODES = frozenset({"auto", "always", "never"})
 
 
 def imap_search_mode() -> ImapSearchMode:
@@ -148,6 +150,29 @@ def imap_search_mode() -> ImapSearchMode:
     if mode == "local":
         return "local"
     return "server"
+
+
+def imap_id_mode() -> ImapIdMode:
+    """Return the process default for RFC 2971 IMAP ID after LOGIN.
+
+    Unset means ``auto`` (send ID only when the server advertises it). ``always``
+    sends the 163-compatible compact ID even when CAPABILITY omits it. ``never``
+    skips the command. An account field overrides this value when present.
+    """
+
+    raw = os.getenv("MCP_EMAIL_SERVER_IMAP_ID_MODE")
+    if raw is None:
+        return "auto"
+    mode = raw.strip().casefold()
+    if mode not in _IMAP_ID_MODES:
+        raise ValueError("MCP_EMAIL_SERVER_IMAP_ID_MODE must be one of: auto, always, never")
+    return mode  # type: ignore[return-value]
+
+
+def resolve_imap_id_mode(configured: ImapIdMode | None) -> ImapIdMode:
+    """Resolve the IMAP ID mode for one account."""
+
+    return imap_id_mode() if configured is None else configured
 
 
 def normalize_address(raw: str) -> str:
@@ -392,6 +417,8 @@ class EmailSettings(AccountAttributes):
     # None inherits MCP_EMAIL_SERVER_IMAP_SEARCH_MODE, which defaults to server.
     # Managed accounts leave this unset and follow that same process default.
     imap_search_mode: ImapSearchMode | None = None
+    # None inherits MCP_EMAIL_SERVER_IMAP_ID_MODE, which defaults to auto.
+    imap_id_mode: ImapIdMode | None = None
 
     @model_validator(mode="after")
     def validate_tags(self) -> EmailSettings:
@@ -437,6 +464,8 @@ class EmailSettings(AccountAttributes):
         allowed_mutations: list[MutationClass] | None = None,
         drafts_mailbox: str | None = None,
         allow_protocol_commands: bool = False,
+        imap_search_mode: ImapSearchMode | None = None,
+        imap_id_mode: ImapIdMode | None = None,
     ) -> EmailSettings:
         for candidate in (password, imap_password, smtp_password):
             if candidate == keyring_store.SENTINEL:
@@ -477,11 +506,59 @@ class EmailSettings(AccountAttributes):
             allowed_mutations=allowed_mutations,
             drafts_mailbox=drafts_mailbox,
             allow_protocol_commands=allow_protocol_commands,
+            imap_search_mode=imap_search_mode,
+            imap_id_mode=imap_id_mode,
         )
 
     @classmethod
+    def from_env_kwargs(cls, kwargs: dict[str, Any]) -> EmailSettings | None:
+        """Build one account from already-collected environment kwargs."""
+
+        try:
+            allowed_mutations = kwargs.get("allowed_mutations")
+            if allowed_mutations is None and "MCP_EMAIL_SERVER_ACCOUNT_ALLOWED_MUTATIONS" in os.environ:
+                allowed_mutations = list(
+                    parse_mutations([
+                        item.strip()
+                        for item in os.environ["MCP_EMAIL_SERVER_ACCOUNT_ALLOWED_MUTATIONS"].split(",")
+                        if item.strip()
+                    ])
+                )
+            return cls.init(
+                account_name=kwargs["account_name"],
+                full_name=kwargs["full_name"],
+                email_address=kwargs["email_address"],
+                user_name=kwargs["user_name"],
+                password=kwargs["password"],
+                imap_host=kwargs["imap_host"],
+                imap_port=int(kwargs.get("imap_port", 993)),
+                imap_ssl=bool(kwargs.get("imap_ssl", True)),
+                imap_start_ssl=bool(kwargs.get("imap_start_ssl", False)),
+                imap_verify_ssl=bool(kwargs.get("imap_verify_ssl", True)),
+                smtp_host=kwargs.get("smtp_host"),
+                smtp_port=int(kwargs.get("smtp_port", 465)),
+                smtp_ssl=bool(kwargs.get("smtp_ssl", True)),
+                smtp_start_ssl=bool(kwargs.get("smtp_start_ssl", False)),
+                smtp_verify_ssl=bool(kwargs.get("smtp_verify_ssl", True)),
+                smtp_user_name=kwargs.get("smtp_user_name", kwargs["user_name"]),
+                smtp_password=kwargs.get("smtp_password", kwargs["password"]),
+                imap_user_name=kwargs.get("imap_user_name", kwargs["user_name"]),
+                imap_password=kwargs.get("imap_password", kwargs["password"]),
+                save_to_sent=bool(kwargs.get("save_to_sent", True)),
+                sent_folder_name=kwargs.get("sent_folder_name"),
+                drafts_mailbox=kwargs.get("drafts_mailbox"),
+                allow_protocol_commands=bool(kwargs.get("allow_protocol_commands", False)),
+                allowed_mutations=allowed_mutations,
+                imap_search_mode=kwargs.get("imap_search_mode"),
+                imap_id_mode=kwargs.get("imap_id_mode"),
+            )
+        except (ValueError, TypeError) as e:
+            logger.error(f"Failed to create email settings from environment variables: {e}")
+            return None
+
+    @classmethod
     def from_env(cls) -> EmailSettings | None:
-        """Create EmailSettings from environment variables.
+        """Create EmailSettings from the unprefixed MCP_EMAIL_SERVER_* variables.
 
         Expected environment variables:
         - MCP_EMAIL_SERVER_ACCOUNT_NAME (default: "default")
@@ -502,66 +579,19 @@ class EmailSettings(AccountAttributes):
         - MCP_EMAIL_SERVER_SAVE_TO_SENT (default: true)
         - MCP_EMAIL_SERVER_SENT_FOLDER_NAME (default: auto-detect)
         - MCP_EMAIL_SERVER_ALLOW_PROTOCOL_COMMANDS (default: false)
+        - MCP_EMAIL_SERVER_IMAP_ID_MODE (default: auto)
+        - MCP_EMAIL_SERVER_PRESET (optional named provider preset)
         """
-        # Check if minimum required environment variables are set
-        email_address = os.getenv("MCP_EMAIL_SERVER_EMAIL_ADDRESS")
-        password = os.getenv("MCP_EMAIL_SERVER_PASSWORD")
-
-        if not email_address or not password:
-            return None
-
-        # Get all environment variables with defaults
-        account_name = os.getenv("MCP_EMAIL_SERVER_ACCOUNT_NAME", "default")
-        full_name = os.getenv("MCP_EMAIL_SERVER_FULL_NAME", email_address.split("@")[0])
-        user_name = os.getenv("MCP_EMAIL_SERVER_USER_NAME", email_address)
-        imap_host = os.getenv("MCP_EMAIL_SERVER_IMAP_HOST")
-        smtp_host = os.getenv("MCP_EMAIL_SERVER_SMTP_HOST")
-
-        # Required fields check
-        if not imap_host:
-            logger.warning("Missing required email configuration environment variable: IMAP_HOST")
-            return None
+        from mcp_email_server.env_accounts import collect_account_kwargs
 
         try:
-            return cls.init(
-                account_name=account_name,
-                full_name=full_name,
-                email_address=email_address,
-                user_name=user_name,
-                password=password,
-                imap_host=imap_host,
-                imap_port=int(os.getenv("MCP_EMAIL_SERVER_IMAP_PORT", "993")),
-                imap_ssl=_parse_bool_env(os.getenv("MCP_EMAIL_SERVER_IMAP_SSL"), True),
-                imap_start_ssl=_parse_bool_env(os.getenv("MCP_EMAIL_SERVER_IMAP_START_SSL"), False),
-                imap_verify_ssl=_parse_bool_env(os.getenv("MCP_EMAIL_SERVER_IMAP_VERIFY_SSL"), True),
-                smtp_host=smtp_host,
-                smtp_port=int(os.getenv("MCP_EMAIL_SERVER_SMTP_PORT", "465")),
-                smtp_ssl=_parse_bool_env(os.getenv("MCP_EMAIL_SERVER_SMTP_SSL"), True),
-                smtp_start_ssl=_parse_bool_env(os.getenv("MCP_EMAIL_SERVER_SMTP_START_SSL"), False),
-                smtp_verify_ssl=_parse_bool_env(os.getenv("MCP_EMAIL_SERVER_SMTP_VERIFY_SSL"), True),
-                smtp_user_name=os.getenv("MCP_EMAIL_SERVER_SMTP_USER_NAME", user_name),
-                smtp_password=os.getenv("MCP_EMAIL_SERVER_SMTP_PASSWORD", password),
-                imap_user_name=os.getenv("MCP_EMAIL_SERVER_IMAP_USER_NAME", user_name),
-                imap_password=os.getenv("MCP_EMAIL_SERVER_IMAP_PASSWORD", password),
-                save_to_sent=_parse_bool_env(os.getenv("MCP_EMAIL_SERVER_SAVE_TO_SENT"), True),
-                sent_folder_name=os.getenv("MCP_EMAIL_SERVER_SENT_FOLDER_NAME"),
-                drafts_mailbox=os.getenv("MCP_EMAIL_SERVER_DRAFTS_MAILBOX"),
-                allow_protocol_commands=_parse_bool_env(os.getenv("MCP_EMAIL_SERVER_ALLOW_PROTOCOL_COMMANDS"), False),
-                allowed_mutations=(
-                    list(
-                        parse_mutations([
-                            item.strip()
-                            for item in os.environ["MCP_EMAIL_SERVER_ACCOUNT_ALLOWED_MUTATIONS"].split(",")
-                            if item.strip()
-                        ])
-                    )
-                    if "MCP_EMAIL_SERVER_ACCOUNT_ALLOWED_MUTATIONS" in os.environ
-                    else None
-                ),
-            )
+            spec = collect_account_kwargs("MCP_EMAIL_SERVER_")
         except (ValueError, TypeError) as e:
             logger.error(f"Failed to create email settings from environment variables: {e}")
             return None
+        if spec is None:
+            return None
+        return cls.from_env_kwargs(spec)
 
     def masked(self) -> EmailSettings:
         return self.model_copy(
@@ -685,22 +715,26 @@ class Settings(BaseSettings):
         self._inject_env_account()
 
     def _inject_env_account(self) -> None:
-        env_email = EmailSettings.from_env()
-        if not env_email:
+        from mcp_email_server.env_accounts import iter_env_account_specs
+
+        specs = iter_env_account_specs()
+        if not specs:
             return
-
-        existing_account = None
-        for i, email in enumerate(self.emails):
-            if email.account_name == env_email.account_name:
-                existing_account = i
-                break
-
-        if existing_account is not None:
-            self.emails[existing_account] = env_email
-            logger.info(f"Overriding email account '{env_email.account_name}' with environment variables")
-        else:
-            self.emails.insert(0, env_email)
-            logger.info(f"Added email account '{env_email.account_name}' from environment variables")
+        for spec in reversed(specs):
+            env_email = EmailSettings.from_env_kwargs(spec)
+            if env_email is None:
+                continue
+            existing_account = None
+            for i, email in enumerate(self.emails):
+                if email.account_name == env_email.account_name:
+                    existing_account = i
+                    break
+            if existing_account is not None:
+                self.emails[existing_account] = env_email
+                logger.info(f"Overriding email account '{env_email.account_name}' with environment variables")
+            else:
+                self.emails.insert(0, env_email)
+                logger.info(f"Added email account '{env_email.account_name}' from environment variables")
 
     def _pending_keyring_sentinels(self) -> list[tuple[str, str, EmailServer | ProviderSettings]]:
         pending: list[tuple[str, str, EmailServer | ProviderSettings]] = []

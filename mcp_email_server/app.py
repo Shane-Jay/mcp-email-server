@@ -59,8 +59,17 @@ from mcp_email_server.emails.models import (
     EmailMetadataPageResponse,
     MailboxInfo,
 )
+from mcp_email_server.http_auth import healthz
 from mcp_email_server.imap_keywords import ImapKeywordTag
+from mcp_email_server.reply_compose import (
+    build_reply_body,
+    build_thread_headers,
+    format_original_date,
+    reply_recipients,
+    reply_subject,
+)
 from mcp_email_server.runtime import close_application_runtime, get_application_runtime
+from mcp_email_server.tool_filter import filter_mcp_tools
 
 MAX_IMAP_UID_CHARACTERS = len(str(APPLICATION_LIMITS.maximum_imap_uid))
 UidInput = Annotated[str, Field(max_length=MAX_IMAP_UID_CHARACTERS, pattern=r"^[1-9][0-9]*$")]
@@ -289,7 +298,8 @@ class EmailMCP(FastMCP):
             if tool.name == "email_command":
                 tool.inputSchema = ProtocolRequest.model_json_schema()
                 tool.outputSchema = ProtocolResult.model_json_schema()
-        return tools
+        hide_protocol = not _protocol_command_advertised()
+        return filter_mcp_tools(tools, hide_protocol_command=hide_protocol)
 
     async def call_tool(self, name: str, arguments: dict[str, Any]):  # pyright: ignore[reportIncompatibleMethodOverride] - MCP supports CallToolResult, SDK annotation omits it
         if name != "email_command":
@@ -309,6 +319,21 @@ class EmailMCP(FastMCP):
 mcp = EmailMCP("email", lifespan=_application_lifespan)
 # FastMCP 1.x does not expose its low-level server version in the constructor.
 mcp._mcp_server.version = version("mcp-email-server")  # pyright: ignore[reportPrivateUsage]
+
+
+def _protocol_command_advertised() -> bool:
+    """Advertise email_command only when at least one account opts in."""
+    try:
+        from mcp_email_server.config import get_settings
+
+        return any(account.allow_protocol_commands for account in get_settings().emails)
+    except Exception:
+        return False
+
+
+@mcp.custom_route("/healthz", methods=["GET"])
+async def _healthz(request):  # pyright: ignore[reportUnusedParameter]
+    return await healthz(request)
 
 _READ_ONLY_LOCAL = ToolAnnotations(
     readOnlyHint=True,
@@ -1010,6 +1035,134 @@ async def save_draft(
     )
     warning = "; warning: reconciliation needed" if outcome.reconciliation_needed else ""
     return f"Draft save [{outcome.status}: {outcome.mailbox}; Message-Id: {outcome.message_id}{warning}]"
+
+
+@mcp.tool(
+    description=(
+        "Reply to an existing message. Fetches the original, sets In-Reply-To and References, "
+        "prefixes Re: without stacking, quotes the original plain text, and sends through send_email "
+        "so recipient allowlist, attachments, and Sent-copy behaviour stay unchanged. "
+        "reply_all=true copies the original To/Cc recipients except this account."
+    ),
+    annotations=_NONDESTRUCTIVE_REMOTE_MUTATION,
+)
+async def reply_email(
+    account_name: Annotated[
+        str,
+        Field(max_length=APPLICATION_LIMITS.account_name_bytes, description="The name of the email account to send from."),
+    ],
+    email_id: Annotated[UidInput, Field(description="UID of the message to reply to.")],
+    body: Annotated[
+        str,
+        Field(max_length=APPLICATION_LIMITS.body_bytes, description="Your reply text, placed above the quoted original."),
+    ],
+    mailbox: Annotated[
+        str,
+        Field(default="INBOX", max_length=APPLICATION_LIMITS.mailbox_bytes, description="Mailbox containing the original."),
+    ] = "INBOX",
+    reply_all: Annotated[bool, Field(default=False, description="If true, CC the original To/Cc recipients except yourself.")] = False,
+    cc: Annotated[
+        list[AddressInput] | None,
+        Field(default=None, max_length=APPLICATION_LIMITS.recipients, description="Extra CC addresses."),
+    ] = None,
+    bcc: Annotated[
+        list[AddressInput] | None,
+        Field(default=None, max_length=APPLICATION_LIMITS.recipients, description="BCC addresses."),
+    ] = None,
+    html: Annotated[bool, Field(default=False, description="Whether the reply note is HTML.")] = False,
+    attachments: Annotated[
+        list[AttachmentPathInput] | None,
+        Field(default=None, max_length=APPLICATION_LIMITS.attachments, description="Local files to attach from the allowlisted directory."),
+    ] = None,
+) -> str:
+    original = await get_email_content_query(
+        GetEmailContentQuery(account_name=account_name, email_ids=(email_id,), mailbox=mailbox)
+    )
+    if not original.emails:
+        raise ValueError("Original message was not found or could not be read")
+    source = original.emails[0]
+    account = next((item for item in list_effective_accounts() if item.account_name == account_name), None)
+    self_address = (account.email_address if account is not None else None) or ""
+    to_addresses, cc_from_original = reply_recipients(
+        mode="reply-all" if reply_all else "reply",
+        sender=source.sender,
+        to_header=", ".join(source.recipients),
+        cc_header=None,
+        self_address=self_address or "",
+    )
+    extra_cc = list(cc or [])
+    combined_cc = list(dict.fromkeys([*cc_from_original, *extra_cc]))
+    in_reply_to, references = build_thread_headers(
+        message_id=source.message_id,
+        existing_references=source.references,
+        existing_in_reply_to=source.in_reply_to,
+    )
+    quoted_body = body if html else build_reply_body(
+        note=body,
+        sender=source.sender,
+        date=format_original_date(source.date),
+        original_body=source.body.replace("...[TRUNCATED]", ""),
+    )
+    return await send_email(
+        account_name=account_name,
+        recipients=to_addresses,
+        subject=reply_subject(source.subject),
+        body=quoted_body,
+        cc=combined_cc or None,
+        bcc=bcc,
+        html=html,
+        attachments=attachments,
+        in_reply_to=in_reply_to,
+        references=references,
+        reply_to=None,
+    )
+
+
+@mcp.tool(
+    description=(
+        "Send an existing draft by email_id. The draft is read, submitted through send_email "
+        "(recipient allowlist and Sent-copy still apply), then deleted from the drafts mailbox on a clean send."
+    ),
+    annotations=_NONDESTRUCTIVE_REMOTE_MUTATION,
+)
+async def send_draft(
+    account_name: Annotated[
+        str, Field(max_length=APPLICATION_LIMITS.account_name_bytes, description="The name of the email account.")
+    ],
+    email_id: Annotated[UidInput, Field(description="UID of the draft to send.")],
+    mailbox: Annotated[
+        str,
+        Field(
+            default="Drafts",
+            max_length=APPLICATION_LIMITS.mailbox_bytes,
+            description="Mailbox containing the draft. Defaults to Drafts.",
+        ),
+    ] = "Drafts",
+) -> str:
+    original = await get_email_content_query(
+        GetEmailContentQuery(account_name=account_name, email_ids=(email_id,), mailbox=mailbox)
+    )
+    if not original.emails:
+        raise ValueError("Draft was not found or could not be read")
+    source = original.emails[0]
+    if not source.recipients:
+        raise ValueError("Draft has no recipients; edit it before sending")
+    result = await send_email(
+        account_name=account_name,
+        recipients=list(source.recipients),
+        subject=source.subject,
+        body=source.body.replace("...[TRUNCATED]", ""),
+        cc=None,
+        bcc=None,
+        html=False,
+        attachments=None,
+        in_reply_to=source.in_reply_to,
+        references=source.references,
+        reply_to=None,
+    )
+    if result.startswith("Email sent successfully"):
+        await delete_emails_command(DeleteCommand(account_name, (email_id,), mailbox))
+    return result
 
 
 @mcp.tool(

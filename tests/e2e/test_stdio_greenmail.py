@@ -1944,8 +1944,9 @@ async def test_protocol_primitives_over_stdio_against_greenmail(tmp_path: Path) 
         async with ClientSession(read_stream, write_stream, read_timeout_seconds=timedelta(seconds=15)) as session:
             await session.initialize()
             tools = {tool.name: tool for tool in (await session.list_tools()).tools}
-            assert len(tools) == 21
+            assert len(tools) == 23
             assert "create_mailbox" in tools and "email_command" in tools
+            assert "reply_email" in tools and "send_draft" in tools
             help_result = await _call_tool(session, "email_command", {"commands": [{"command": "HELP UID COPY"}]})
             assert help_result["results"][0]["code"] == "HELP"
             await _call_tool(session, "create_mailbox", {"account_name": "alice", "mailbox": destination})

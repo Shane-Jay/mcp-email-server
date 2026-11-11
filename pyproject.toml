@@ -1,6 +1,6 @@
 [project]
 name = "mcp-email-server"
-version = "0.0.1"
+version = "1.15.0"
 description = "Full-featured, multi-account MCP email server for Windows, macOS, and Linux—read, search, organize, and send email via IMAP and SMTP."
 authors = [{ name = "wh1isper", email = "jizhongsheng957@gmail.com" }]
 readme = "README.md"
@@ -22,6 +22,7 @@ dependencies = [
     "anyio>=4.5",
     "beautifulsoup4>=4.14.3",
     "click>=8.0.0",
+    "cryptography>=50.0.1",
     "filelock>=3.32.2",
     "jinja2>=3.1.5",
     "keyring>=25.0",
@@ -91,6 +92,10 @@ include = [
     "/.dockerignore",
     "/.pre-commit-config.yaml",
     "/Dockerfile",
+    "/docker-compose.example.yml",
+    "/env.example",
+    "/NOTICE",
+    "/CHANGES-vs-upstream.md",
     "/codecov.yaml",
     "/dev",
     "/tests",

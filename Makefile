@@ -35,9 +35,12 @@ check: frontend-check ## Run code quality tools
 	@uv run deptry .
 
 .PHONY: test
-test: ## Test the code with pytest
+test: ## Test the code with pytest (excludes GreenMail e2e)
 	@echo "Testing code with pytest"
 	@uv run python -m pytest --cov --cov-config=pyproject.toml --cov-report=xml -vv -s
+
+.PHONY: test-unit
+test-unit: test ## Alias for make test
 
 .PHONY: test-e2e
 test-e2e: ## Test the stdio MCP server against local GreenMail SMTP and IMAP services

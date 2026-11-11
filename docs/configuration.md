@@ -685,8 +685,12 @@ verify_ssl = true
 Every `account_name` must be unique across the configuration. MCP tools use this
 name to select an account.
 
-The environment variable interface describes one account. Use TOML or the UI
-when persistent configuration requires multiple accounts.
+The unprefixed `MCP_EMAIL_SERVER_*` variables still describe one account.
+Additionally, `MCP_EMAIL_SERVER_ACCOUNTS=name1,name2` loads
+`MCP_EMAIL_SERVER_ACCOUNT_<name>_*` for each name (email, password or
+`PASSWORD_FILE`, optional `PRESET`, and the same IMAP/SMTP fields). Named
+accounts do not require the V2 admin UI. See [env.example](../env.example) and
+[provider presets](providers.md).
 
 ## TLS modes
 
@@ -856,6 +860,18 @@ values are treated as false. Do not add surrounding whitespace to these values.
 | `MCP_EMAIL_SERVER_LOG_LEVEL`                        | `INFO`                                   | Set the Loguru logging level, such as `DEBUG` or `WARNING`.                                                                                                                                                       |
 | `MCP_EMAIL_SERVER_IMAP_NON_ASCII_SEARCH`            | `auto`                                   | `literal`, `quoted`, or `auto`. `auto` quotes non-ASCII IMAP SEARCH text for `imap.qq.com` and uses synchronizing UTF-8 literals elsewhere. A legacy account field overrides it.                                  |
 | `MCP_EMAIL_SERVER_IMAP_SEARCH_MODE`                 | `server`                                 | `server` or `local`. `server` sends subject, from, and to to IMAP SEARCH. `local` filters those headers from the metadata observation. The host name does not choose a mode. A legacy account field overrides it. |
+| `MCP_EMAIL_SERVER_IMAP_ID_MODE`                     | `auto`                                   | `auto`, `always`, or `never`. `auto` sends RFC 2971 ID only when CAPABILITY advertises it. `always` sends the compact 163-compatible ID anyway. A legacy account field overrides it. |
+| `MCP_EMAIL_SERVER_IMAP_POOL`                        | `false`                                  | Reuse one authenticated IMAP connection per endpoint with NOOP health checks. |
+| `MCP_EMAIL_SERVER_SMTP_POOL`                        | `false`                                  | Optional SMTP connection reuse (off unless you opt in). |
+| `MCP_EMAIL_SERVER_POOL_IDLE_SECONDS`                | `60`                                     | Drop a pooled connection after this many idle seconds. |
+| `MCP_EMAIL_SERVER_ATTACHMENT_DIR`                   | unset                                    | When set, outgoing `attachments` paths must resolve inside this directory. |
+| `MCP_EMAIL_SERVER_TOOL_ALLOW`                       | unset                                    | Comma-separated tool names to advertise; unset means all minus denials. |
+| `MCP_EMAIL_SERVER_TOOL_DENY`                        | unset                                    | Extra tool names hidden from `tools/list`. `email_command` is hidden unless an account enables protocol commands. |
+| `MCP_EMAIL_CACHE_KEY`                               | unset                                    | Enables the AES-256-GCM local cache. Never put credentials in the cache. |
+| `MCP_EMAIL_CACHE_KEY_FILE`                          | unset                                    | Read the cache key from a secret file. |
+| `MCP_EMAIL_CACHE_DIR`                               | `$HOME/.cache/mcp-email-server`          | Directory for the encrypted SQLite cache. |
+| `MCP_EMAIL_CACHE_MAX_BYTES`                         | `67108864`                               | Approximate ciphertext budget; oldest records are evicted. |
+| `MCP_EMAIL_CACHE_MAX_AGE_SECONDS`                   | `604800`                                 | Drop cached records older than this. |
 | `MCP_EMAIL_SERVER_METADATA_SNAPSHOT_ROWS`           | `1000`                                   | Maximum rows in one metadata projection. An integer from 1 through 100000. Mailboxes above this stay partial and are listed from IMAP.                                                                            |
 | `MCP_EMAIL_SERVER_METADATA_REFRESH_TIMEOUT_SECONDS` | `60`                                     | Per-batch timeout for a metadata projection refresh, from 1 to 3600 seconds. It does not change other IMAP or SMTP deadlines.                                                                                     |
 | `MCP_EMAIL_SERVER_METADATA_HEADER_BUDGET_BYTES`     | `4194304`                                | Aggregate raw-header budget. 65536 through 67108864 bytes. A refresh applies it to each UID batch; a filtered metadata query applies it once.                                                                     |

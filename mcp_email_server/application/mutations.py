@@ -640,14 +640,21 @@ def _preflight_attachment_sizes(attachments: tuple[str, ...]) -> None:
     SMB/WebDAV session for a UNC path the request was never allowed to use.
     """
 
+    from mcp_email_server.attachment_paths import configured_attachment_dir, resolve_allowed_attachment_path
+
     total_size = 0
+    allowlist_enabled = configured_attachment_dir() is not None
     for raw_path in attachments:
-        path = Path(raw_path)
-        try:
+        if allowlist_enabled:
+            path = resolve_allowed_attachment_path(raw_path)
             metadata = path.stat()
-        except OSError:
-            # Preserve the classic composer as the owner of path-specific errors.
-            continue
+        else:
+            path = Path(raw_path)
+            try:
+                metadata = path.stat()
+            except OSError:
+                # Preserve the classic composer as the owner of path-specific errors.
+                continue
         if not path.is_file():
             continue
         size = metadata.st_size

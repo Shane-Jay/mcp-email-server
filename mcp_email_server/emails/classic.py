@@ -67,14 +67,24 @@ from mcp_email_server.application.mutations import (
     normalize_thread_message_ids,
     validate_mailbox_name,
 )
+from mcp_email_server.attachment_paths import resolve_allowed_attachment_path
 from mcp_email_server.config import (
     EmailServer,
     EmailSettings,
+    ImapIdMode,
     ImapNonAsciiSearchEncoding,
     ImapNonAsciiSearchMode,
     get_settings,
+    resolve_imap_id_mode,
     resolve_imap_non_ascii_search,
     sender_allowed,
+)
+from mcp_email_server.connection_pool import (
+    endpoint_key,
+    get_imap_pool,
+    imap_session_is_authenticated,
+    imap_was_pooled,
+    pooled_imap,
 )
 from mcp_email_server.emails import EmailHandler, charsets
 from mcp_email_server.emails.models import (
@@ -839,6 +849,9 @@ def _has_already_exists_code(response: Any) -> bool:
 
 def _discard_metadata_imap(imap: aioimaplib.IMAP4 | aioimaplib.IMAP4_SSL) -> None:
     """Release a metadata connection whose command boundary is uncertain."""
+    pool = pooled_imap(imap)
+    if pool is not None:
+        pool.discard_sync(imap)
     protocol = imap.protocol
     if protocol is not None:
         if isinstance(protocol, aioimaplib.IMAP4ClientProtocol):
@@ -865,6 +878,10 @@ def _discard_metadata_imap(imap: aioimaplib.IMAP4 | aioimaplib.IMAP4_SSL) -> Non
 
 async def _close_metadata_imap(imap: aioimaplib.IMAP4 | aioimaplib.IMAP4_SSL, *, discard: bool = False) -> None:
     """Bound graceful logout and always release the underlying transport."""
+    pool = pooled_imap(imap)
+    if pool is not None:
+        await pool.release(imap, discard=discard)
+        return
     if discard:
         _discard_metadata_imap(imap)
         return
@@ -881,6 +898,13 @@ async def _close_metadata_imap(imap: aioimaplib.IMAP4 | aioimaplib.IMAP4_SSL, *,
 
 async def _best_effort_imap_logout(imap: Any) -> None:
     """Close an IMAP session without replacing mutation evidence with cleanup failure."""
+    pool = pooled_imap(imap)
+    if pool is not None:
+        await pool.release(imap, discard=False)
+        return
+    if imap_was_pooled(imap):
+        # Already returned to the pool by a previous release; do not LOGOUT.
+        return
     try:
         await imap.logout()
     except (asyncio.CancelledError, Exception):
@@ -933,6 +957,9 @@ def _discard_imap_after_sync_failure(
     command: aioimaplib.Command,
 ) -> None:
     """Abort a stream after a multi-step synchronous command loses framing."""
+    pool = pooled_imap(imap)
+    if pool is not None:
+        pool.discard_sync(imap)
     protocol = imap.protocol
     if protocol is None:
         return
@@ -954,6 +981,9 @@ def _discard_imap_after_id_failure(
     command: aioimaplib.Command,
 ) -> None:
     """Abort an IMAP stream whose ID response boundary is no longer known."""
+    pool = pooled_imap(imap)
+    if pool is not None:
+        pool.discard_sync(imap)
     protocol = imap.protocol
     if protocol is None:
         return
@@ -971,8 +1001,15 @@ def _discard_imap_after_id_failure(
     command.close(b"IMAP ID connection aborted", "KO")
 
 
-async def _send_imap_id(imap: aioimaplib.IMAP4 | aioimaplib.IMAP4_SSL) -> None:
-    """Send one compact RFC 2971 ID command when the server advertises it.
+async def _send_imap_id(
+    imap: aioimaplib.IMAP4 | aioimaplib.IMAP4_SSL,
+    mode: ImapIdMode | None = None,
+) -> None:
+    """Send one compact RFC 2971 ID command according to ``mode``.
+
+    ``auto`` (default, current behaviour) sends ID only when the server
+    advertises the capability. ``always`` sends it anyway — required by
+    Coremail/163 even when CAPABILITY omits ID. ``never`` skips the command.
 
     aioimaplib formats ID lists with spaces immediately inside the parentheses,
     which the RFC 2971 grammar does not permit and strict servers such as
@@ -982,11 +1019,21 @@ async def _send_imap_id(imap: aioimaplib.IMAP4 | aioimaplib.IMAP4_SSL) -> None:
     See: https://github.com/Wh1isper/mcp-email-server/issues/85
     See: https://github.com/Wh1isper/mcp-email-server/issues/217
     """
+    if imap_session_is_authenticated(imap):
+        return
+    resolved: ImapIdMode
+    if mode is not None:
+        resolved = mode
+    else:
+        configured = getattr(imap, "_mcp_id_mode", None)
+        resolved = configured if configured in ("auto", "always", "never") else "auto"
+    if resolved == "never":
+        return
     protocol = imap.protocol
     if protocol is None:
         logger.warning("IMAP ID command failed: IMAP protocol is not connected")
         return
-    if "ID" not in _imap_capabilities(imap):
+    if resolved == "auto" and "ID" not in _imap_capabilities(imap):
         return
     command = aioimaplib.Command(
         "ID",
@@ -1105,6 +1152,8 @@ async def _imap_login(
     real error and back off, and so a one-off auth failure does not cascade
     into a multi-minute lock-out.
     """
+    if imap_session_is_authenticated(imap):
+        return
     try:
         response = await imap.login(user_name, password)
     except (asyncio.CancelledError, TimeoutError):
@@ -1346,10 +1395,12 @@ class EmailClient:
         sender_name: str | None = None,
         sender_address: str | None = None,
         imap_non_ascii_search: ImapNonAsciiSearchMode | None = None,
+        imap_id_mode: ImapIdMode | None = None,
     ):
         self.mutation_guard: Callable[[], None] | None = None
         self.email_server = email_server
         self.imap_non_ascii_search: ImapNonAsciiSearchMode | None = imap_non_ascii_search
+        self.imap_id_mode: ImapIdMode | None = imap_id_mode
         raw_sender = sender or email_server.user_name
         if sender_name is not None and sender_address is not None:
             self.sender_name = sender_name
@@ -1409,8 +1460,35 @@ class EmailClient:
 
     async def _connect_imap(self, *, timeout: float | None = None) -> aioimaplib.IMAP4_SSL | aioimaplib.IMAP4:
         """Create, greet, and optionally STARTTLS-upgrade an IMAP connection."""
+        pool = get_imap_pool()
+        if pool is not None:
+            key = endpoint_key(
+                self.email_server.host,
+                self.email_server.port,
+                self.email_server.user_name,
+                use_ssl=self.email_server.use_ssl,
+                start_ssl=self.email_server.start_ssl,
+            )
+
+            async def _open() -> aioimaplib.IMAP4_SSL | aioimaplib.IMAP4:
+                client = self._imap_connect(timeout=timeout)
+                prepared = await self._prepare_imap_connection(client, self.email_server)
+                prepared._mcp_id_mode = resolve_imap_id_mode(self.imap_id_mode)
+                return prepared
+
+            async def _login(imap: aioimaplib.IMAP4_SSL | aioimaplib.IMAP4) -> None:
+                await _imap_login(
+                    imap,
+                    self.email_server.user_name,
+                    self.email_server.password.get_secret_value(),
+                )
+                await _send_imap_id(imap, mode=resolve_imap_id_mode(self.imap_id_mode))
+
+            return await pool.acquire(key, connect=_open, login=_login)
         imap = self._imap_connect(timeout=timeout)
-        return await self._prepare_imap_connection(imap, self.email_server)
+        prepared = await self._prepare_imap_connection(imap, self.email_server)
+        prepared._mcp_id_mode = resolve_imap_id_mode(self.imap_id_mode)
+        return prepared
 
     @staticmethod
     async def _abort_imap_connection(imap: aioimaplib.IMAP4_SSL | aioimaplib.IMAP4) -> None:
@@ -1446,25 +1524,59 @@ class EmailClient:
         return imap
 
     @staticmethod
-    async def _connect_imap_server(server: EmailServer) -> aioimaplib.IMAP4_SSL | aioimaplib.IMAP4:
-        """Create, greet, and optionally STARTTLS-upgrade an IMAP connection."""
+    def _create_imap_client(
+        server: EmailServer,
+        *,
+        timeout: float | None = None,
+    ) -> aioimaplib.IMAP4_SSL | aioimaplib.IMAP4:
+        """Construct an IMAP client for ``server`` without connecting."""
+        if timeout is None:
+            timeout = APPLICATION_LIMITS.provider_timeout_seconds
         if server.use_ssl:
             imap_ssl_context = _create_ssl_context(server.verify_ssl)
             if imap_ssl_context is None:
-                imap = aioimaplib.IMAP4_SSL(
-                    server.host, server.port, timeout=APPLICATION_LIMITS.provider_timeout_seconds
-                )
-            else:
-                imap = aioimaplib.IMAP4_SSL(
-                    server.host,
-                    server.port,
-                    ssl_context=imap_ssl_context,
-                    timeout=APPLICATION_LIMITS.provider_timeout_seconds,
-                )
-        else:
-            imap = aioimaplib.IMAP4(server.host, server.port, timeout=APPLICATION_LIMITS.provider_timeout_seconds)
+                return aioimaplib.IMAP4_SSL(server.host, server.port, timeout=timeout)
+            return aioimaplib.IMAP4_SSL(
+                server.host,
+                server.port,
+                ssl_context=imap_ssl_context,
+                timeout=timeout,
+            )
+        return aioimaplib.IMAP4(server.host, server.port, timeout=timeout)
 
-        return await EmailClient._prepare_imap_connection(imap, server)
+    @staticmethod
+    async def _connect_imap_server(
+        server: EmailServer,
+        *,
+        id_mode: ImapIdMode | None = None,
+    ) -> aioimaplib.IMAP4_SSL | aioimaplib.IMAP4:
+        """Create, greet, and optionally STARTTLS-upgrade an IMAP connection."""
+        pool = get_imap_pool()
+        if pool is not None:
+            key = endpoint_key(
+                server.host,
+                server.port,
+                server.user_name,
+                use_ssl=server.use_ssl,
+                start_ssl=server.start_ssl,
+            )
+
+            async def _open() -> aioimaplib.IMAP4_SSL | aioimaplib.IMAP4:
+                client = EmailClient._create_imap_client(server)
+                prepared = await EmailClient._prepare_imap_connection(client, server)
+                prepared._mcp_id_mode = resolve_imap_id_mode(id_mode)
+                return prepared
+
+            async def _login(imap: aioimaplib.IMAP4_SSL | aioimaplib.IMAP4) -> None:
+                await _imap_login(imap, server.user_name, server.password.get_secret_value())
+                await _send_imap_id(imap, mode=resolve_imap_id_mode(id_mode))
+
+            return await pool.acquire(key, connect=_open, login=_login)
+
+        imap = EmailClient._create_imap_client(server)
+        prepared = await EmailClient._prepare_imap_connection(imap, server)
+        prepared._mcp_id_mode = resolve_imap_id_mode(id_mode)
+        return prepared
 
     def _get_smtp_ssl_context(self) -> ssl.SSLContext | None:
         """Get SSL context for SMTP connections based on verify_ssl setting."""
@@ -2813,7 +2925,7 @@ class EmailClient:
         finally:
             # Ensure we logout properly
             try:
-                await imap.logout()
+                await _best_effort_imap_logout(imap)
             except Exception:
                 logger.info("IMAP logout failed")
 
@@ -2884,7 +2996,7 @@ class EmailClient:
 
         finally:
             try:
-                await imap.logout()
+                await _best_effort_imap_logout(imap)
             except Exception:
                 logger.info("IMAP logout failed")
 
@@ -3029,24 +3141,13 @@ class EmailClient:
             }
         finally:
             try:
-                await imap.logout()
+                await _best_effort_imap_logout(imap)
             except Exception:
                 logger.info("IMAP logout failed")
 
     def _validate_attachment(self, file_path: str) -> Path:
-        """Validate attachment file path."""
-        path = Path(file_path)
-        if not path.exists():
-            msg = f"Attachment file not found: {file_path}"
-            logger.error(msg)
-            raise FileNotFoundError(msg)
-
-        if not path.is_file():
-            msg = f"Attachment path is not a file: {file_path}"
-            logger.error(msg)
-            raise ValueError(msg)
-
-        return path
+        """Validate attachment file path and enforce the outgoing allowlist."""
+        return resolve_allowed_attachment_path(file_path)
 
     def _read_attachment(self, path: Path) -> bytes:
         """Read one attachment without allowing a preflight-to-read size race."""
@@ -3560,7 +3661,7 @@ class EmailClient:
         sent_folder_name: str | None = None,
     ) -> SentCopyMutationOutcome:
         """Append a sent copy once, without replay after an ambiguous APPEND."""
-        imap = await self._connect_imap_server(incoming_server)
+        imap = await self._connect_imap_server(incoming_server, id_mode=self.imap_id_mode)
         candidates = [
             sent_folder_name,
             "Sent",
@@ -3654,7 +3755,7 @@ class EmailClient:
     ) -> AppendMutationOutcome:
         """Append exactly once and distinguish rejection from a lost result."""
         message_id = msg["Message-Id"] or "saved"
-        imap = await self._connect_imap_server(incoming_server)
+        imap = await self._connect_imap_server(incoming_server, id_mode=self.imap_id_mode)
         try:
             await _imap_login(imap, incoming_server.user_name, incoming_server.password.get_secret_value())
             await _send_imap_id(imap)
@@ -3716,7 +3817,7 @@ class EmailClient:
         (if the server supports APPENDUID / RFC 4315), or ``"unknown"`` on
         success without UID, or ``None`` on failure.
         """
-        imap = await self._connect_imap_server(incoming_server)
+        imap = await self._connect_imap_server(incoming_server, id_mode=self.imap_id_mode)
 
         try:
             await _imap_login(imap, incoming_server.user_name, incoming_server.password.get_secret_value())
@@ -3764,7 +3865,7 @@ class EmailClient:
             return None
         finally:
             try:
-                await imap.logout()
+                await _best_effort_imap_logout(imap)
             except Exception:
                 logger.debug("IMAP logout failed")
 
@@ -4226,7 +4327,7 @@ class EmailClient:
                         deleted_ids = [email_id for email_id in deleted_ids if email_id not in expunge_set]
         finally:
             try:
-                await imap.logout()
+                await _best_effort_imap_logout(imap)
             except Exception:
                 logger.info("IMAP logout failed")
 
@@ -4273,7 +4374,7 @@ class EmailClient:
                     failed_ids.append(email_id)
         finally:
             try:
-                await imap.logout()
+                await _best_effort_imap_logout(imap)
             except Exception:
                 logger.info("IMAP logout failed")
 
@@ -4345,7 +4446,7 @@ class EmailClient:
                         moved_ids = [uid for uid in moved_ids if uid not in copied_set]
         finally:
             try:
-                await imap.logout()
+                await _best_effort_imap_logout(imap)
             except Exception:
                 logger.info("IMAP logout failed")
 
@@ -4376,7 +4477,7 @@ class EmailClient:
             mailboxes.extend(_parse_list_responses(data))
         finally:
             try:
-                await imap.logout()
+                await _best_effort_imap_logout(imap)
             except Exception:
                 logger.info("IMAP logout failed")
 
@@ -4430,6 +4531,143 @@ class EmailClient:
             await _best_effort_imap_logout(imap)
 
 
+async def _cache_uidvalidity(client: EmailClient, mailbox: str) -> int | None:
+    from mcp_email_server.encrypted_cache import get_encrypted_cache
+
+    if get_encrypted_cache() is None:
+        return None
+    try:
+        state = await client.get_mailbox_state(mailbox)
+    except Exception:
+        return None
+    return state.uidvalidity
+
+
+def _read_body_from_cache(
+    account_name: str,
+    mailbox: str,
+    email_id: str,
+    uidvalidity: int | None,
+    *,
+    body_offset: int,
+    max_body_length: int,
+) -> EmailBodyResponse | None:
+    from mcp_email_server.encrypted_cache import get_encrypted_cache
+
+    cache = get_encrypted_cache()
+    if cache is None or uidvalidity is None:
+        return None
+    payload = cache.get(
+        account=account_name,
+        mailbox=mailbox,
+        uid=email_id,
+        uidvalidity=uidvalidity,
+        kind="body",
+    )
+    if payload is None:
+        return None
+    body = str(payload.get("body", ""))
+    window = body[body_offset : body_offset + max_body_length]
+    if body_offset + max_body_length < len(body):
+        window += "...[TRUNCATED]"
+    date_value = payload.get("date")
+    if isinstance(date_value, str):
+        try:
+            date_value = datetime.fromisoformat(date_value)
+        except ValueError:
+            date_value = datetime.now(UTC)
+    if not isinstance(date_value, datetime):
+        date_value = datetime.now(UTC)
+    return EmailBodyResponse(
+        email_id=email_id,
+        message_id=payload.get("message_id"),
+        in_reply_to=payload.get("in_reply_to"),
+        references=payload.get("references"),
+        subject=str(payload.get("subject", "")),
+        sender=str(payload.get("sender", "")),
+        recipients=list(payload.get("recipients") or []),
+        date=date_value,
+        body=window,
+        attachments=list(payload.get("attachments") or []),
+    )
+
+
+def _store_body_in_cache(
+    account_name: str,
+    mailbox: str,
+    uidvalidity: int | None,
+    email_data: dict[str, Any],
+) -> None:
+    from mcp_email_server.encrypted_cache import get_encrypted_cache
+
+    cache = get_encrypted_cache()
+    if cache is None or uidvalidity is None:
+        return
+    uid = str(email_data.get("email_id") or "")
+    if not uid:
+        return
+    cache.ensure_uidvalidity(account_name, mailbox, uidvalidity)
+    payload = {
+        "subject": email_data.get("subject", ""),
+        "sender": email_data.get("from", ""),
+        "recipients": email_data.get("to", []),
+        "date": email_data.get("date"),
+        "message_id": email_data.get("message_id"),
+        "in_reply_to": email_data.get("in_reply_to"),
+        "references": email_data.get("references"),
+        "attachments": email_data.get("attachments", []),
+        "body": email_data.get("body", ""),
+    }
+    cache.put(
+        account=account_name,
+        mailbox=mailbox,
+        uid=uid,
+        uidvalidity=uidvalidity,
+        kind="body",
+        payload=payload,
+    )
+    cache.put(
+        account=account_name,
+        mailbox=mailbox,
+        uid=uid,
+        uidvalidity=uidvalidity,
+        kind="headers",
+        payload={key: value for key, value in payload.items() if key != "body"},
+    )
+
+
+def _store_headers_in_cache(
+    account_name: str,
+    mailbox: str,
+    uidvalidity: int,
+    email_data: dict[str, Any],
+) -> None:
+    from mcp_email_server.encrypted_cache import get_encrypted_cache
+
+    cache = get_encrypted_cache()
+    if cache is None:
+        return
+    uid = str(email_data.get("email_id") or "")
+    if not uid:
+        return
+    cache.ensure_uidvalidity(account_name, mailbox, uidvalidity)
+    cache.put(
+        account=account_name,
+        mailbox=mailbox,
+        uid=uid,
+        uidvalidity=uidvalidity,
+        kind="headers",
+        payload={
+            "subject": email_data.get("subject", ""),
+            "sender": email_data.get("from", ""),
+            "recipients": email_data.get("to", []),
+            "date": email_data.get("date"),
+            "message_id": email_data.get("message_id"),
+            "attachments": email_data.get("attachments", []),
+        },
+    )
+
+
 class ClassicEmailHandler(EmailHandler):
     def __init__(self, email_settings: EmailSettings):
         self.email_settings = email_settings
@@ -4440,6 +4678,7 @@ class ClassicEmailHandler(EmailHandler):
             sender_name=email_settings.full_name,
             sender_address=email_settings.email_address,
             imap_non_ascii_search=email_settings.imap_non_ascii_search,
+            imap_id_mode=email_settings.imap_id_mode,
         )
         self.outgoing_client = (
             EmailClient(
@@ -4447,6 +4686,7 @@ class ClassicEmailHandler(EmailHandler):
                 sender_name=email_settings.full_name,
                 sender_address=email_settings.email_address,
                 imap_non_ascii_search=email_settings.imap_non_ascii_search,
+                imap_id_mode=email_settings.imap_id_mode,
             )
             if email_settings.outgoing
             else None
@@ -4491,6 +4731,10 @@ class ClassicEmailHandler(EmailHandler):
             allowed_senders=get_settings().allowed_senders,
         )
         emails = [EmailMetadata.from_email(d) for d in email_dicts]
+        uidvalidity = await _cache_uidvalidity(self.incoming_client, mailbox)
+        if uidvalidity is not None:
+            for email_dict in email_dicts:
+                _store_headers_in_cache(self.email_settings.account_name, mailbox, uidvalidity, email_dict)
         return EmailMetadataPageResponse(
             page=page,
             page_size=page_size,
@@ -4520,8 +4764,20 @@ class ClassicEmailHandler(EmailHandler):
         emails = []
         failed_ids = []
 
+        uidvalidity = await _cache_uidvalidity(self.incoming_client, mailbox)
         for email_id in email_ids:
             try:
+                cached = _read_body_from_cache(
+                    self.email_settings.account_name,
+                    mailbox,
+                    email_id,
+                    uidvalidity,
+                    body_offset=body_offset,
+                    max_body_length=max_body_length,
+                )
+                if cached is not None:
+                    emails.append(cached)
+                    continue
                 email_data = await self.incoming_client.get_email_body_by_id(
                     email_id,
                     mailbox,
@@ -4533,6 +4789,7 @@ class ClassicEmailHandler(EmailHandler):
                 if not email_data:
                     failed_ids.append(email_id)
                     continue
+                _store_body_in_cache(self.email_settings.account_name, mailbox, uidvalidity, email_data)
                 emails.append(
                     EmailBodyResponse(
                         email_id=email_data["email_id"],

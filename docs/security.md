@@ -752,7 +752,9 @@ execute.
 
 The separate `attachments` parameter on `send_email` and `save_to_mailbox`
 reads local file paths. Relative paths are likewise resolved against the server
-process's working directory. Only connect clients that should be trusted to
+process's working directory. When `MCP_EMAIL_SERVER_ATTACHMENT_DIR` is set,
+paths are symlink-resolved and must stay inside that directory; traversal and
+escapes are rejected. Only connect clients that should be trusted to
 request access to files visible to that process. Requests rejected by account,
 send-capability (for `send_email`), or recipient-allowlist checks never open,
 stat, or resolve caller-supplied attachment paths, including UNC or network

@@ -27,6 +27,7 @@ from mcp_email_server.application.management import (
     validate_endpoint,
 )
 from mcp_email_server.application.mutation_policy import parse_mutations
+from mcp_email_server.http_auth import HttpAuthError, require_http_auth, wrap_http_app
 from mcp_email_server.imap_keywords import ImapKeywordTag
 from mcp_email_server.runtime import get_application_runtime
 from mcp_email_server.stdio import run_bounded_stdio
@@ -182,6 +183,25 @@ def _configure_http_transport(host: str, port: int) -> None:
     mcp.settings.host = host
     mcp.settings.port = port
     mcp.settings.transport_security = _build_transport_security_settings(host, port)
+
+
+def _run_authenticated_http(transport: str) -> None:
+    """Start SSE or Streamable HTTP with bearer-token auth wrapping the ASGI app."""
+    import uvicorn
+
+    try:
+        auth = require_http_auth()
+    except HttpAuthError as exc:
+        _fail_cli(exc)
+    app = mcp.sse_app() if transport == "sse" else mcp.streamable_http_app()
+    app = wrap_http_app(app, auth)
+    config = uvicorn.Config(
+        app,
+        host=mcp.settings.host,
+        port=mcp.settings.port,
+        log_level="info",
+    )
+    uvicorn.Server(config).run()
 
 
 def _json_requested() -> bool:
@@ -1339,7 +1359,7 @@ def sse(
     """Run the compatibility SSE transport with explicit HTTP trust boundaries."""
     _validate_managed_runtime()
     _configure_http_transport(host, port)
-    mcp.run(transport="sse")
+    _run_authenticated_http("sse")
 
 
 @app.command()
@@ -1356,7 +1376,7 @@ def streamable_http(
     """Run the compatibility Streamable HTTP transport with explicit trust boundaries."""
     _validate_managed_runtime()
     _configure_http_transport(host, port)
-    mcp.run(transport="streamable-http")
+    _run_authenticated_http("streamable-http")
 
 
 @app.command()

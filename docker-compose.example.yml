@@ -1,0 +1,52 @@
+# Example compose file for a single NAS container (Synology / Docker).
+# Copy to docker-compose.yml, copy env.example to .env, chmod 600 .env,
+# then: docker compose up -d
+#
+# Do not publish the local management UI. This service only exposes the MCP
+# Streamable HTTP port on the private network (Tailscale/WireGuard).
+
+services:
+  mcp-email:
+    image: mcp-email-server:local
+    build: .
+    command: ["streamable-http", "--host", "0.0.0.0", "--port", "9557"]
+    restart: unless-stopped
+    read_only: true
+    user: "1000:1000"
+    env_file:
+      - .env
+    environment:
+      HOME: /data
+      TMPDIR: /tmp
+      MCP_EMAIL_SERVER_CONFIG_PATH: /data/config.toml
+      MCP_EMAIL_CACHE_DIR: /data/cache
+      MCP_EMAIL_SERVER_ATTACHMENT_DIR: /data/attachments
+    ports:
+      - "9557:9557"
+    volumes:
+      - mcp-email-data:/data
+      - mcp-email-cache:/data/cache
+      - mcp-email-attachments:/data/attachments
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9557/healthz', timeout=3).read()",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+volumes:
+  mcp-email-data:
+  mcp-email-cache:
+  mcp-email-attachments:

@@ -200,6 +200,27 @@ Explicit `--host` and `--port` options override those defaults.
 | `MCP_ALLOWED_HOSTS`                   | Derived safe values | Comma-separated allowed HTTP `Host` values.   |
 | `MCP_ALLOWED_ORIGINS`                 | Derived safe values | Comma-separated allowed HTTP `Origin` values. |
 | `MCP_ENABLE_DNS_REBINDING_PROTECTION` | `true`              | Enable `Host` and `Origin` validation.        |
+| `MCP_EMAIL_HTTP_BEARER_TOKEN`         | unset               | Required Bearer token for SSE and Streamable HTTP. |
+| `MCP_EMAIL_HTTP_BEARER_TOKENS`        | unset               | Comma-separated extra tokens for rotation.    |
+| `MCP_EMAIL_HTTP_BEARER_TOKEN_FILE`    | unset               | Read the token from a secret file (mode 0600). |
+| `MCP_EMAIL_HTTP_INSECURE`             | `false`             | Allow HTTP without a token (isolated development only). |
+
+## Bearer-token authentication
+
+SSE and Streamable HTTP refuse to start unless at least one bearer token is
+configured, or `MCP_EMAIL_HTTP_INSECURE=true` is set explicitly. Clients send:
+
+```http
+Authorization: Bearer <token>
+```
+
+Tokens are hashed with SHA-256 and compared with `hmac.compare_digest`. Every
+configured token is compared (no early return) so rotation does not leak which
+token matched. `/healthz` is unauthenticated for container health checks.
+stdio is unchanged and does not use this header.
+
+Host/Origin DNS-rebinding protection still applies independently of bearer
+tokens.
 
 ## DNS rebinding protection
 

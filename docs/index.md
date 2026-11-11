@@ -15,6 +15,7 @@ email without tying the client to a specific email provider.
 - [Configuration](configuration.md) — configure accounts with TOML or environment variables.
 - [MCP Tools](tools.md) — understand the tools exposed to MCP clients.
 - [Transports](transports.md) — run the server over stdio, SSE, or Streamable HTTP.
+- [Providers](providers.md) — 163, Aliyun enterprise, iCloud, QQ, and Tsinghua Coremail presets.
 - [Security](security.md) — manage credentials, allowlists, TLS, and attachment access.
 - [Guides](guides.md) — configure IMAP-only accounts, ProtonMail Bridge, drafts, and replies.
 - [Troubleshooting](troubleshooting.md) — resolve common account, keyring, TLS, and transport problems.
@@ -28,6 +29,7 @@ email without tying the client to a specific email provider.
 - Read long messages in bounded chunks.
 - Send plain-text or HTML messages with attachments.
 - Preserve reply threading with `In-Reply-To` and `References` headers.
+- Reply, reply-all, forward (including original attachments), save drafts, and send an existing draft.
 - Save drafts and other composed messages through IMAP.
 - Move, archive, mark, and delete messages.
 - Store credentials in the operating system keyring when available.

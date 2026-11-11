@@ -1,14 +1,8 @@
-# Container image for mcp-email-server.
+# Multi-arch runtime image for the self-hosted IMAP/SMTP MCP server.
+# Build: docker buildx build --platform linux/amd64,linux/arm64 -t mcp-email-server .
 #
-# A Dockerfile existed until #203 ("migrate project infrastructure"), where it
-# was dropped along with the release workflow's publishing job. This restores a
-# build, in a two-stage form so the runtime layer carries neither uv nor the
-# build inputs.
-#
-# The virtualenv deliberately stays at /app/.venv: deployments that override
-# the entrypoint address the interpreter directly (for example to run the
-# server over streamable-http instead of stdio), and that path was the
-# de-facto interface of the previous image.
+# The virtualenv stays at /app/.venv so an overridden entrypoint can still
+# address the interpreter directly.
 
 ARG PYTHON_VERSION=3.13
 ARG UV_VERSION=0.11.29
@@ -24,7 +18,6 @@ ENV UV_COMPILE_BYTECODE=1 \
 
 WORKDIR /app
 
-# Dependencies first, so a source-only change does not invalidate this layer.
 COPY uv.lock pyproject.toml README.md LICENSE ./
 RUN uv sync --frozen --no-install-project --no-dev
 
@@ -33,24 +26,31 @@ RUN uv sync --frozen --no-dev --no-editable
 
 FROM python:${PYTHON_VERSION}-slim AS runtime
 
-LABEL org.opencontainers.image.source="https://github.com/Wh1isper/mcp-email-server" \
-      org.opencontainers.image.description="MCP server for IMAP and SMTP email workflows" \
+LABEL org.opencontainers.image.description="Self-hosted multi-account IMAP/SMTP MCP server" \
       org.opencontainers.image.licenses="BSD-3-Clause"
 
-# tini reaps the children the server spawns; without an init the container
-# accumulates zombies on long-running IMAP sessions.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends tini \
- && rm -rf /var/lib/apt/lists/*
+ && rm -rf /var/lib/apt/lists/* \
+ && useradd --uid 1000 --create-home --home-dir /data mcp \
+ && mkdir -p /data/cache /data/attachments /tmp \
+ && chown -R mcp:mcp /data /tmp
 
 WORKDIR /app
 
-# The venv holds absolute paths, so the runtime stage must use the same base
-# image and the same /app prefix as the builder. The project is installed
-# non-editably, allowing the runtime image to exclude all source and build files.
 COPY --from=builder /app/.venv /app/.venv
+RUN chown -R mcp:mcp /app/.venv
 
-ENV PATH="/app/.venv/bin:$PATH"
+ENV PATH="/app/.venv/bin:$PATH" \
+    HOME=/data \
+    TMPDIR=/tmp \
+    MCP_EMAIL_SERVER_CONFIG_PATH=/data/config.toml \
+    MCP_EMAIL_CACHE_DIR=/data/cache \
+    MCP_EMAIL_SERVER_ATTACHMENT_DIR=/data/attachments
+
+USER mcp
 
 ENTRYPOINT ["tini", "--", "mcp-email-server"]
+# Default remains stdio so container smoke tests and local clients keep working.
+# docker-compose.example.yml overrides this to Streamable HTTP for NAS use.
 CMD ["stdio"]

@@ -795,7 +795,7 @@ cli = [
 
 [[package]]
 name = "mcp-email-server"
-version = "0.0.1"
+version = "1.15.0"
 source = { editable = "." }
 dependencies = [
     { name = "aioimaplib" },
@@ -803,6 +803,7 @@ dependencies = [
     { name = "anyio" },
     { name = "beautifulsoup4" },
     { name = "click" },
+    { name = "cryptography" },
     { name = "filelock" },
     { name = "jinja2" },
     { name = "keyring" },
@@ -841,6 +842,7 @@ requires-dist = [
     { name = "anyio", specifier = ">=4.5" },
     { name = "beautifulsoup4", specifier = ">=4.14.3" },
     { name = "click", specifier = ">=8.0.0" },
+    { name = "cryptography", specifier = ">=50.0.1" },
     { name = "filelock", specifier = ">=3.32.2" },
     { name = "jinja2", specifier = ">=3.1.5" },
     { name = "keyring", specifier = ">=25.0" },
