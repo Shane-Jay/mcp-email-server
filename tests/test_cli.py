@@ -58,7 +58,13 @@ def test_transport_security_uses_explicit_allowed_hosts(monkeypatch):
     settings = _build_transport_security_settings(WILDCARD_IPV4_BIND_HOST, 9557)
 
     assert settings.enable_dns_rebinding_protection is True
-    assert settings.allowed_hosts == ["mcp-email-server", "mcp-email-server:*", "localhost:*"]
+    assert settings.allowed_hosts == [
+        "127.0.0.1:*",
+        "localhost:*",
+        "[::1]:*",
+        "mcp-email-server",
+        "mcp-email-server:*",
+    ]
     assert settings.allowed_origins == [
         "http://mcp-email-server",
         "http://mcp-email-server:*",
@@ -124,9 +130,37 @@ def test_configure_http_transport_updates_mcp_settings(monkeypatch):
 
         assert mcp.settings.host == WILDCARD_IPV4_BIND_HOST
         assert mcp.settings.port == 9557
-        assert mcp.settings.transport_security.allowed_hosts == ["mcp-email-server:*"]
+        assert mcp.settings.transport_security.allowed_hosts == [
+            "127.0.0.1:*",
+            "localhost:*",
+            "[::1]:*",
+            "mcp-email-server:*",
+        ]
         assert mcp.settings.transport_security.allowed_origins == ["http://mcp-email-server:*"]
     finally:
         mcp.settings.host = original_host
         mcp.settings.port = original_port
         mcp.settings.transport_security = original_transport_security
+
+
+def test_wildcard_bind_with_tailscale_and_lan_allowlist_keeps_loopback(monkeypatch):
+    monkeypatch.setenv(
+        "MCP_ALLOWED_HOSTS",
+        "nas.tail-abcd.ts.net,100.64.12.34,192.168.1.50:9557",
+    )
+    monkeypatch.delenv("MCP_ALLOWED_ORIGINS", raising=False)
+
+    settings = _build_transport_security_settings(WILDCARD_IPV4_BIND_HOST, 9557)
+
+    assert settings.enable_dns_rebinding_protection is True
+    for expected in (
+        "127.0.0.1:*",
+        "localhost:*",
+        "[::1]:*",
+        "nas.tail-abcd.ts.net",
+        "nas.tail-abcd.ts.net:*",
+        "100.64.12.34",
+        "100.64.12.34:*",
+        "192.168.1.50:9557",
+    ):
+        assert expected in settings.allowed_hosts

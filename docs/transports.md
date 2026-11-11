@@ -230,12 +230,14 @@ hosts and origins are allowed for local use.
 When binding to a named non-loopback host, that host is included in the derived
 allowlist. When binding to a wildcard address such as `0.0.0.0` or `::`, the
 server cannot infer the public hostname. Configure the expected service names
-explicitly:
+explicitly. Loopback Hosts (`127.0.0.1`, `localhost`, `[::1]`) stay allowed so
+the container healthcheck can call `/healthz` even when the allowlist is a
+Tailscale MagicDNS name, a tailnet IP, or a LAN IP (with or without a port):
 
 ```bash
 MCP_HOST=0.0.0.0 \
-MCP_ALLOWED_HOSTS='mail-mcp.example.com,mcp-email-server' \
-MCP_ALLOWED_ORIGINS='https://mail-mcp.example.com' \
+MCP_ALLOWED_HOSTS='nas.tail-xxxx.ts.net,100.64.1.10,192.168.1.50:9557' \
+MCP_ALLOWED_ORIGINS='https://nas.tail-xxxx.ts.net' \
 mcp-email-server streamable-http
 ```
 

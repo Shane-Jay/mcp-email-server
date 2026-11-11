@@ -4,6 +4,11 @@
 #
 # Do not publish the local management UI. This service only exposes the MCP
 # Streamable HTTP port on the private network (Tailscale/WireGuard).
+#
+# Host DNS-rebinding: set MCP_ALLOWED_HOSTS in .env to the names/IPs clients
+# will send in the Host header (MagicDNS, tailnet CGNAT IP, LAN IP:port).
+# Binding 0.0.0.0 with that explicit list is supported; loopback is always
+# kept so the healthcheck below can use http://127.0.0.1:9557/healthz.
 
 services:
   mcp-email:

@@ -163,6 +163,12 @@ def _default_allowed_origins(host: str, port: int) -> list[str]:
     return allowed_origins
 
 
+def _with_loopback_hosts(allowed_hosts: list[str]) -> list[str]:
+    """Keep loopback Hosts so a wildcard bind + Tailscale allowlist still serves /healthz."""
+
+    return _unique([*LOOPBACK_ALLOWED_HOSTS, *allowed_hosts])
+
+
 def _build_transport_security_settings(host: str, port: int) -> TransportSecuritySettings:
     allowed_hosts = _split_csv(os.environ.get("MCP_ALLOWED_HOSTS"))
     allowed_origins = _split_csv(os.environ.get("MCP_ALLOWED_ORIGINS"))
@@ -170,9 +176,13 @@ def _build_transport_security_settings(host: str, port: int) -> TransportSecurit
     if not _is_dns_rebinding_protection_enabled() or "*" in allowed_hosts or "*" in allowed_origins:
         return TransportSecuritySettings(enable_dns_rebinding_protection=False)
 
+    if allowed_hosts:
+        hosts = _expand_allowed_hosts(_with_loopback_hosts(allowed_hosts))
+    else:
+        hosts = _default_allowed_hosts(host, port)
     return TransportSecuritySettings(
         enable_dns_rebinding_protection=True,
-        allowed_hosts=_expand_allowed_hosts(allowed_hosts) if allowed_hosts else _default_allowed_hosts(host, port),
+        allowed_hosts=hosts,
         allowed_origins=_expand_allowed_origins(allowed_origins)
         if allowed_origins
         else _default_allowed_origins(host, port),
