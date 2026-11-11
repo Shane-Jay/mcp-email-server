@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -77,6 +78,44 @@ def test_local_header_search(tmp_path: Path):
     assert len(hits) == 1
     assert hits[0]["email_id"] == "3"
     assert cache.search_headers(account="163", mailbox="INBOX", uidvalidity=5, from_address="nope") == []
+    cache.close()
+
+
+def test_sqlite_index_does_not_store_plaintext_subjects_or_addresses(tmp_path: Path):
+    cache = _cache(tmp_path)
+    account = "acct-unique-billing-work"
+    mailbox = "Mailbox-Unique-Archive-Folder"
+    subject = "SECRET-SUBJECT-Invoice-4242"
+    sender = "billing@shop.test"
+    recipient = "finance-unique@example.test"
+    cache.put(
+        account=account,
+        mailbox=mailbox,
+        uid="3",
+        uidvalidity=5,
+        kind="headers",
+        payload={"subject": subject, "sender": sender, "recipients": [recipient]},
+    )
+    cache.close()
+    db_path = tmp_path / "cache.sqlite3"
+    raw = db_path.read_bytes()
+    for needle in (account.encode(), mailbox.encode(), subject.encode(), sender.encode(), recipient.encode()):
+        assert needle not in raw
+    conn = sqlite3.connect(db_path)
+    try:
+        account_row, mailbox_row = conn.execute("SELECT account, mailbox FROM records").fetchone()
+        epoch_account, epoch_mailbox = conn.execute("SELECT account, mailbox FROM mailbox_epochs").fetchone()
+    finally:
+        conn.close()
+    for token in (account_row, mailbox_row, epoch_account, epoch_mailbox):
+        assert isinstance(token, str)
+        assert len(token) == 64
+        assert set(token) <= set("0123456789abcdef")
+    cache = EncryptedMailCache(db_path, b"k" * 32, max_bytes=4096, max_age_seconds=3600)
+    hits = cache.search_headers(account=account, mailbox=mailbox, uidvalidity=5, subject="invoice")
+    assert len(hits) == 1
+    assert hits[0]["subject"] == subject
+    assert hits[0]["sender"] == sender
     cache.close()
 
 

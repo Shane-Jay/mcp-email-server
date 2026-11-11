@@ -2,17 +2,21 @@
 
 The cache is off unless a key is supplied through ``MCP_EMAIL_CACHE_KEY`` or
 ``MCP_EMAIL_CACHE_KEY_FILE``. Credentials are never written. Records are bound
-to IMAP UIDVALIDITY so a mailbox reset cannot serve stale UIDs.
+to IMAP UIDVALIDITY so a mailbox reset cannot serve stale UIDs. The SQLite
+index stores HMAC-SHA256 tokens for account and mailbox names plus IMAP UIDs;
+subjects and addresses live only inside AES-GCM ciphertext.
 """
 
 from __future__ import annotations
 
+import hmac
 import json
 import os
 import sqlite3
 import tempfile
 import time
 from dataclasses import dataclass
+from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
@@ -74,8 +78,6 @@ def cache_key_material() -> bytes | None:
     raw = secret.encode("utf-8")
     if len(raw) == 32:
         return raw
-    from hashlib import sha256
-
     return sha256(raw).digest()
 
 
@@ -109,6 +111,7 @@ class EncryptedMailCache:
         if len(key) != 32:
             raise CacheEncryptionError("cache key must be 32 bytes")
         self.path = path
+        self._key = key
         self._aesgcm = AESGCM(key)
         self.max_bytes = max_bytes
         self.max_age_seconds = max_age_seconds
@@ -157,17 +160,30 @@ class EncryptedMailCache:
     def _aad(self, account: str, mailbox: str, uid: str, uidvalidity: int, kind: str) -> bytes:
         return f"{account}\0{mailbox}\0{uid}\0{uidvalidity}\0{kind}".encode()
 
+    def _index_token(self, kind: str, value: str) -> str:
+        """HMAC-SHA256 index key so the SQLite columns never store account/mailbox names."""
+
+        return hmac.new(self._key, f"{kind}:{value}".encode(), sha256).hexdigest()
+
+    def _account_token(self, account: str) -> str:
+        return self._index_token("account", account)
+
+    def _mailbox_token(self, mailbox: str) -> str:
+        return self._index_token("mailbox", mailbox)
+
     def ensure_uidvalidity(self, account: str, mailbox: str, uidvalidity: int) -> None:
         """Drop cached rows when the provider reports a new UIDVALIDITY."""
 
+        account_token = self._account_token(account)
+        mailbox_token = self._mailbox_token(mailbox)
         row = self._conn.execute(
             "SELECT uidvalidity FROM mailbox_epochs WHERE account = ? AND mailbox = ?",
-            (account, mailbox),
+            (account_token, mailbox_token),
         ).fetchone()
         if row is None:
             self._conn.execute(
                 "INSERT INTO mailbox_epochs(account, mailbox, uidvalidity) VALUES (?, ?, ?)",
-                (account, mailbox, uidvalidity),
+                (account_token, mailbox_token, uidvalidity),
             )
             self._conn.commit()
             return
@@ -175,11 +191,11 @@ class EncryptedMailCache:
             return
         self._conn.execute(
             "DELETE FROM records WHERE account = ? AND mailbox = ?",
-            (account, mailbox),
+            (account_token, mailbox_token),
         )
         self._conn.execute(
             "UPDATE mailbox_epochs SET uidvalidity = ? WHERE account = ? AND mailbox = ?",
-            (uidvalidity, account, mailbox),
+            (uidvalidity, account_token, mailbox_token),
         )
         self._conn.commit()
 
@@ -212,7 +228,18 @@ class EncryptedMailCache:
                 last_access = excluded.last_access,
                 size = excluded.size
             """,
-            (account, mailbox, uid, uidvalidity, kind, nonce, ciphertext, now, now, len(nonce) + len(ciphertext)),
+            (
+                self._account_token(account),
+                self._mailbox_token(mailbox),
+                uid,
+                uidvalidity,
+                kind,
+                nonce,
+                ciphertext,
+                now,
+                now,
+                len(nonce) + len(ciphertext),
+            ),
         )
         self._conn.commit()
         self.enforce_limits()
@@ -231,7 +258,7 @@ class EncryptedMailCache:
             SELECT nonce, ciphertext FROM records
             WHERE account = ? AND mailbox = ? AND uid = ? AND uidvalidity = ? AND kind = ?
             """,
-            (account, mailbox, uid, uidvalidity, kind),
+            (self._account_token(account), self._mailbox_token(mailbox), uid, uidvalidity, kind),
         ).fetchone()
         if row is None:
             return None
@@ -242,7 +269,7 @@ class EncryptedMailCache:
         except Exception:
             self._conn.execute(
                 "DELETE FROM records WHERE account = ? AND mailbox = ? AND uid = ? AND uidvalidity = ? AND kind = ?",
-                (account, mailbox, uid, uidvalidity, kind),
+                (self._account_token(account), self._mailbox_token(mailbox), uid, uidvalidity, kind),
             )
             self._conn.commit()
             return None
@@ -251,7 +278,14 @@ class EncryptedMailCache:
             UPDATE records SET last_access = ?
             WHERE account = ? AND mailbox = ? AND uid = ? AND uidvalidity = ? AND kind = ?
             """,
-            (time.time(), account, mailbox, uid, uidvalidity, kind),
+            (
+                time.time(),
+                self._account_token(account),
+                self._mailbox_token(mailbox),
+                uid,
+                uidvalidity,
+                kind,
+            ),
         )
         self._conn.commit()
         document = json.loads(plaintext.decode("utf-8"))
@@ -276,7 +310,7 @@ class EncryptedMailCache:
             SELECT uid, nonce, ciphertext FROM records
             WHERE account = ? AND mailbox = ? AND uidvalidity = ? AND kind = 'headers'
             """,
-            (account, mailbox, uidvalidity),
+            (self._account_token(account), self._mailbox_token(mailbox), uidvalidity),
         ).fetchall()
         matches: list[dict[str, Any]] = []
         subject_needle = subject.casefold() if subject else None
