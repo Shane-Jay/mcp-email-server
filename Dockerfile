@@ -29,9 +29,14 @@ FROM python:${PYTHON_VERSION}-slim AS runtime
 LABEL org.opencontainers.image.description="Self-hosted multi-account IMAP/SMTP MCP server" \
       org.opencontainers.image.licenses="BSD-3-Clause"
 
+# Upgrade base packages (zlib and friends) and drop pip/setuptools/wheel: the
+# runtime process uses /app/.venv and does not need a packaging toolchain.
 RUN apt-get update \
+ && apt-get upgrade -y --no-install-recommends \
  && apt-get install -y --no-install-recommends tini \
  && rm -rf /var/lib/apt/lists/* \
+ && python -m pip uninstall -y --disable-pip-version-check pip setuptools wheel \
+ && rm -rf /usr/local/lib/python*/ensurepip \
  && useradd --uid 1000 --create-home --home-dir /data mcp \
  && mkdir -p /data/cache /data/attachments /tmp \
  && chown -R mcp:mcp /data /tmp

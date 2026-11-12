@@ -205,6 +205,8 @@ def test_container_build_context_and_runtime_copy_are_restricted() -> None:
     assert "uv sync --frozen --no-dev --no-editable" in dockerfile
     assert "COPY --from=builder /app/.venv /app/.venv" in dockerfile
     assert "COPY --from=builder /app /app" not in dockerfile
+    assert "apt-get upgrade -y --no-install-recommends" in dockerfile
+    assert "python -m pip uninstall -y --disable-pip-version-check pip setuptools wheel" in dockerfile
     assert 'org.opencontainers.image.licenses="BSD-3-Clause"' in dockerfile
 
 

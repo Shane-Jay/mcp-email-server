@@ -172,9 +172,19 @@ def test_synology_readme_covers_required_steps_in_english_and_chinese() -> None:
 
 def test_smoke_script_is_executable_and_requires_args() -> None:
     assert SMOKE.is_file()
-    mode = SMOKE.stat().st_mode
-    assert mode & stat.S_IXUSR
     assert SMOKE.read_text(encoding="utf-8").startswith("#!/usr/bin/env bash")
+    git = shutil.which("git")
+    assert git is not None
+    listed = subprocess.run(  # noqa: S603 - repository git index mode
+        [git, "ls-files", "-s", "--", "scripts/smoke.sh"],
+        cwd=REPOSITORY,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert listed.stdout.startswith("100755 "), listed.stdout
+    if os.name == "posix":
+        assert SMOKE.stat().st_mode & stat.S_IXUSR
 
 
 class _SmokeHandler(BaseHTTPRequestHandler):
