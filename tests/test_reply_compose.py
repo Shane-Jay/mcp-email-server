@@ -35,7 +35,9 @@ def test_reply_subject_does_not_stack_prefix():
 
 
 def test_quote_and_body():
-    quoted = quote_plain_original(sender="Ada <ada@example.test>", date="Mon, 01 Jan 2024 00:00 +0000", body="Hi\nThere")
+    quoted = quote_plain_original(
+        sender="Ada <ada@example.test>", date="Mon, 01 Jan 2024 00:00 +0000", body="Hi\nThere"
+    )
     assert quoted.startswith("On Mon, 01 Jan 2024 00:00 +0000, Ada <ada@example.test> wrote:")
     assert "> Hi" in quoted
     assert "> There" in quoted

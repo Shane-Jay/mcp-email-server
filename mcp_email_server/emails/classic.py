@@ -1001,6 +1001,17 @@ def _discard_imap_after_id_failure(
     command.close(b"IMAP ID connection aborted", "KO")
 
 
+def _store_imap_id_mode(imap: aioimaplib.IMAP4 | aioimaplib.IMAP4_SSL, mode: ImapIdMode | None) -> None:
+    """Record the ID mode on the live connection.
+
+    aioimaplib's IMAP4 types have no slot for this, so the value is stored as a
+    dynamic attribute and read with ``getattr`` in ``_send_imap_id``.
+    """
+
+    target: Any = imap
+    target._mcp_id_mode = resolve_imap_id_mode(mode)
+
+
 async def _send_imap_id(
     imap: aioimaplib.IMAP4 | aioimaplib.IMAP4_SSL,
     mode: ImapIdMode | None = None,
@@ -1473,7 +1484,7 @@ class EmailClient:
             async def _open() -> aioimaplib.IMAP4_SSL | aioimaplib.IMAP4:
                 client = self._imap_connect(timeout=timeout)
                 prepared = await self._prepare_imap_connection(client, self.email_server)
-                prepared._mcp_id_mode = resolve_imap_id_mode(self.imap_id_mode)
+                _store_imap_id_mode(prepared, self.imap_id_mode)
                 return prepared
 
             async def _login(imap: aioimaplib.IMAP4_SSL | aioimaplib.IMAP4) -> None:
@@ -1487,7 +1498,7 @@ class EmailClient:
             return await pool.acquire(key, connect=_open, login=_login)
         imap = self._imap_connect(timeout=timeout)
         prepared = await self._prepare_imap_connection(imap, self.email_server)
-        prepared._mcp_id_mode = resolve_imap_id_mode(self.imap_id_mode)
+        _store_imap_id_mode(prepared, self.imap_id_mode)
         return prepared
 
     @staticmethod
@@ -1564,7 +1575,7 @@ class EmailClient:
             async def _open() -> aioimaplib.IMAP4_SSL | aioimaplib.IMAP4:
                 client = EmailClient._create_imap_client(server)
                 prepared = await EmailClient._prepare_imap_connection(client, server)
-                prepared._mcp_id_mode = resolve_imap_id_mode(id_mode)
+                _store_imap_id_mode(prepared, id_mode)
                 return prepared
 
             async def _login(imap: aioimaplib.IMAP4_SSL | aioimaplib.IMAP4) -> None:
@@ -1575,7 +1586,7 @@ class EmailClient:
 
         imap = EmailClient._create_imap_client(server)
         prepared = await EmailClient._prepare_imap_connection(imap, server)
-        prepared._mcp_id_mode = resolve_imap_id_mode(id_mode)
+        _store_imap_id_mode(prepared, id_mode)
         return prepared
 
     def _get_smtp_ssl_context(self) -> ssl.SSLContext | None:

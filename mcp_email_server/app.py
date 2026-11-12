@@ -354,6 +354,7 @@ def _protocol_command_advertised() -> bool:
 async def _healthz(request):  # pyright: ignore[reportUnusedParameter]
     return await healthz(request)
 
+
 _READ_ONLY_LOCAL = ToolAnnotations(
     readOnlyHint=True,
     destructiveHint=False,
@@ -1074,18 +1075,26 @@ async def save_draft(
 async def reply_email(
     account_name: Annotated[
         str,
-        Field(max_length=APPLICATION_LIMITS.account_name_bytes, description="The name of the email account to send from."),
+        Field(
+            max_length=APPLICATION_LIMITS.account_name_bytes, description="The name of the email account to send from."
+        ),
     ],
     email_id: Annotated[UidInput, Field(description="UID of the message to reply to.")],
     body: Annotated[
         str,
-        Field(max_length=APPLICATION_LIMITS.body_bytes, description="Your reply text, placed above the quoted original."),
+        Field(
+            max_length=APPLICATION_LIMITS.body_bytes, description="Your reply text, placed above the quoted original."
+        ),
     ],
     mailbox: Annotated[
         str,
-        Field(default="INBOX", max_length=APPLICATION_LIMITS.mailbox_bytes, description="Mailbox containing the original."),
+        Field(
+            default="INBOX", max_length=APPLICATION_LIMITS.mailbox_bytes, description="Mailbox containing the original."
+        ),
     ] = "INBOX",
-    reply_all: Annotated[bool, Field(default=False, description="If true, CC the original To/Cc recipients except yourself.")] = False,
+    reply_all: Annotated[
+        bool, Field(default=False, description="If true, CC the original To/Cc recipients except yourself.")
+    ] = False,
     cc: Annotated[
         list[AddressInput] | None,
         Field(default=None, max_length=APPLICATION_LIMITS.recipients, description="Extra CC addresses."),
@@ -1097,7 +1106,11 @@ async def reply_email(
     html: Annotated[bool, Field(default=False, description="Whether the reply note is HTML.")] = False,
     attachments: Annotated[
         list[AttachmentPathInput] | None,
-        Field(default=None, max_length=APPLICATION_LIMITS.attachments, description="Local files to attach from the allowlisted directory."),
+        Field(
+            default=None,
+            max_length=APPLICATION_LIMITS.attachments,
+            description="Local files to attach from the allowlisted directory.",
+        ),
     ] = None,
 ) -> str:
     original = await get_email_content_query(
@@ -1122,11 +1135,15 @@ async def reply_email(
         existing_references=source.references,
         existing_in_reply_to=source.in_reply_to,
     )
-    quoted_body = body if html else build_reply_body(
-        note=body,
-        sender=source.sender,
-        date=format_original_date(source.date),
-        original_body=source.body.replace("...[TRUNCATED]", ""),
+    quoted_body = (
+        body
+        if html
+        else build_reply_body(
+            note=body,
+            sender=source.sender,
+            date=format_original_date(source.date),
+            original_body=source.body.replace("...[TRUNCATED]", ""),
+        )
     )
     return await send_email(
         account_name=account_name,
@@ -1226,10 +1243,7 @@ async def send_draft(
         ) from exc
     if _send_outcome_is_clean(outcome):
         await _dispose_sent_draft(account_name, email_id, mailbox, outcome.sent_copy)
-        return (
-            f"Email sent successfully to {', '.join(source.recipients)}"
-            f"{_reported_message_id(outcome)}"
-        )
+        return f"Email sent successfully to {', '.join(source.recipients)}{_reported_message_id(outcome)}"
     return f"Email delivery [{_tagged_send_result(outcome)}]"
 
 

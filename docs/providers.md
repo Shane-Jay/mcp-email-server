@@ -5,14 +5,14 @@ behaviour, and header-search mode. They never supply passwords. Set
 `MCP_EMAIL_SERVER_ACCOUNT_<name>_PRESET` (or `MCP_EMAIL_SERVER_PRESET` for the
 unprefixed account) to one of the keys below.
 
-| Key | Service | IMAP | SMTP | IMAP ID | Search | Auth notes |
-| --- | --- | --- | --- | --- | --- | --- |
-| `163` | NetEase 163 Mail | `imap.163.com:993` SSL | `smtp.163.com:465` SSL | `always` | `local` | 16-character authorization code, not the web password |
-| `126` | NetEase 126 Mail | `imap.126.com:993` SSL | `smtp.126.com:465` SSL | `always` | `local` | Same authorization-code rules as 163 |
-| `aliyun` | Aliyun enterprise | `imap.qiye.aliyun.com:993` SSL | `smtp.qiye.aliyun.com:465` SSL | `auto` | `server` | Enterprise mailbox password / client password |
-| `icloud` | iCloud Mail | `imap.mail.me.com:993` SSL | `smtp.mail.me.com:587` STARTTLS | `auto` | `server` | App-specific password from appleid.apple.com |
-| `qq` | QQ Mail | `imap.qq.com:993` SSL | `smtp.qq.com:465` SSL | `auto` | `server` | IMAP/SMTP authorization code; non-ASCII SEARCH is quoted automatically |
-| `tsinghua` | Tsinghua Coremail | `mails.tsinghua.edu.cn:993` SSL | `mails.tsinghua.edu.cn:465` SSL | `always` | `server` | Confirm the current client-password policy with campus mail help |
+| Key        | Service           | IMAP                            | SMTP                            | IMAP ID  | Search   | Auth notes                                                             |
+| ---------- | ----------------- | ------------------------------- | ------------------------------- | -------- | -------- | ---------------------------------------------------------------------- |
+| `163`      | NetEase 163 Mail  | `imap.163.com:993` SSL          | `smtp.163.com:465` SSL          | `always` | `local`  | 16-character authorization code, not the web password                  |
+| `126`      | NetEase 126 Mail  | `imap.126.com:993` SSL          | `smtp.126.com:465` SSL          | `always` | `local`  | Same authorization-code rules as 163                                   |
+| `aliyun`   | Aliyun enterprise | `imap.qiye.aliyun.com:993` SSL  | `smtp.qiye.aliyun.com:465` SSL  | `auto`   | `server` | Enterprise mailbox password / client password                          |
+| `icloud`   | iCloud Mail       | `imap.mail.me.com:993` SSL      | `smtp.mail.me.com:587` STARTTLS | `auto`   | `server` | App-specific password from appleid.apple.com                           |
+| `qq`       | QQ Mail           | `imap.qq.com:993` SSL           | `smtp.qq.com:465` SSL           | `auto`   | `server` | IMAP/SMTP authorization code; non-ASCII SEARCH is quoted automatically |
+| `tsinghua` | Tsinghua Coremail | `mails.tsinghua.edu.cn:993` SSL | `mails.tsinghua.edu.cn:465` SSL | `always` | `server` | Confirm the current client-password policy with campus mail help       |
 
 Aliases: `netease` → `163`, `qiye.aliyun.com` → `aliyun`, `me.com`/`mac.com` → `icloud`, `coremail` → `tsinghua`.
 

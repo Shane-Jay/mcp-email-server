@@ -328,9 +328,11 @@ class EncryptedMailCache:
             hay_subject = str(document.get("subject", "")).casefold()
             hay_from = str(document.get("sender", document.get("from", ""))).casefold()
             recipients = document.get("recipients") or document.get("to") or []
-            hay_to = " ".join(str(item) for item in recipients).casefold() if isinstance(recipients, list) else str(
-                recipients
-            ).casefold()
+            hay_to = (
+                " ".join(str(item) for item in recipients).casefold()
+                if isinstance(recipients, list)
+                else str(recipients).casefold()
+            )
             if subject_needle and subject_needle not in hay_subject:
                 continue
             if from_needle and from_needle not in hay_from:

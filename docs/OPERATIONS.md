@@ -129,10 +129,10 @@ the web login password) on each provider, then put that code in `*_PASSWORD`.
 4. Keep `PRESET=163` (or `126`): IMAP ID is sent even when CAPABILITY omits it,
    and Subject/From/To search is local (163 SEARCH is often empty).
 
-1. 登录 163/126 网页邮箱。
-2. 设置 → POP3/SMTP/IMAP → 开启 IMAP/SMTP。
-3. 生成 16 位授权码，填入 `PASSWORD`（不是网页密码）。
-4. 使用 `PRESET=163` 或 `126`：即使 CAPABILITY 没有 ID 也会发 RFC 2971 ID；主题/发件人/收件人搜索走本地（163 的 SEARCH 经常为空）。
+5. 登录 163/126 网页邮箱。
+6. 设置 → POP3/SMTP/IMAP → 开启 IMAP/SMTP。
+7. 生成 16 位授权码，填入 `PASSWORD`（不是网页密码）。
+8. 使用 `PRESET=163` 或 `126`：即使 CAPABILITY 没有 ID 也会发 RFC 2971 ID；主题/发件人/收件人搜索走本地（163 的 SEARCH 经常为空）。
 
 ### Aliyun enterprise (`qiye.aliyun.com`)
 
@@ -141,10 +141,10 @@ the web login password) on each provider, then put that code in `*_PASSWORD`.
 3. Use the mailbox password or the client password the admin issued.
 4. `PRESET=aliyun` → `imap.qiye.aliyun.com:993` / `smtp.qiye.aliyun.com:465` SSL.
 
-1. 登录阿里云企业邮箱管理端或用户设置。
-2. 若租户关闭了 IMAP/SMTP，先开启。
-3. 使用邮箱密码或管理员下发的客户端密码。
-4. `PRESET=aliyun` 会填入 `imap.qiye.aliyun.com:993` 与 `smtp.qiye.aliyun.com:465`（SSL）。
+5. 登录阿里云企业邮箱管理端或用户设置。
+6. 若租户关闭了 IMAP/SMTP，先开启。
+7. 使用邮箱密码或管理员下发的客户端密码。
+8. `PRESET=aliyun` 会填入 `imap.qiye.aliyun.com:993` 与 `smtp.qiye.aliyun.com:465`（SSL）。
 
 ### iCloud
 
@@ -155,9 +155,9 @@ the web login password) on each provider, then put that code in `*_PASSWORD`.
 3. `PRESET=icloud` → IMAP `imap.mail.me.com:993` SSL, SMTP
    `smtp.mail.me.com:587` STARTTLS.
 
-1. 打开 Apple ID → 登录与安全 → App 专用密码。
-2. 为“邮件”生成专用密码，填入 `PASSWORD`（Apple ID 密码不能登录 IMAP/SMTP）。
-3. `PRESET=icloud`：IMAP `imap.mail.me.com:993` SSL，SMTP `smtp.mail.me.com:587` STARTTLS。
+4. 打开 Apple ID → 登录与安全 → App 专用密码。
+5. 为“邮件”生成专用密码，填入 `PASSWORD`（Apple ID 密码不能登录 IMAP/SMTP）。
+6. `PRESET=icloud`：IMAP `imap.mail.me.com:993` SSL，SMTP `smtp.mail.me.com:587` STARTTLS。
 
 See [providers.md](providers.md) for QQ and Tsinghua Coremail.
 
@@ -187,33 +187,33 @@ rows in process; it works while the cache is encrypted.
 
 ## 7. Troubleshooting
 
-| Symptom | Check |
-| --- | --- |
-| Container exits immediately | HTTP started without a token. Set `MCP_EMAIL_HTTP_BEARER_TOKEN`. |
-| `/healthz` OK, MCP client 401 | Missing or wrong `Authorization: Bearer`. Rotate with `MCP_EMAIL_HTTP_BEARER_TOKENS`. |
-| MCP client 421/invalid Host | Add the MagicDNS name / tailnet IP / LAN `host:port` to `MCP_ALLOWED_HOSTS`. |
-| 163 LOGIN OK then idle failures | Keep `PRESET=163` (`imap_id_mode=always`). |
-| 163 SEARCH returns nothing | Expected; local search + encrypted cache. Confirm `MCP_EMAIL_CACHE_KEY` if you want the cache. |
-| `tool_unavailable` | Tool is denied (`MCP_EMAIL_SERVER_TOOL_DENY` / allowlist) or `email_command` without `allow_protocol_commands`. |
-| Send / reply / forward denied | Empty recipient allowlist denies all. Set `MCP_EMAIL_SERVER_ALLOWED_RECIPIENTS`. |
-| Attachment path rejected | Outgoing files must sit inside `MCP_EMAIL_SERVER_ATTACHMENT_DIR`. Forwarded IMAP parts are not subject to that directory. |
+| Symptom                                | Check                                                                                                                           |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| Container exits immediately            | HTTP started without a token. Set `MCP_EMAIL_HTTP_BEARER_TOKEN`.                                                                |
+| `/healthz` OK, MCP client 401          | Missing or wrong `Authorization: Bearer`. Rotate with `MCP_EMAIL_HTTP_BEARER_TOKENS`.                                           |
+| MCP client 421/invalid Host            | Add the MagicDNS name / tailnet IP / LAN `host:port` to `MCP_ALLOWED_HOSTS`.                                                    |
+| 163 LOGIN OK then idle failures        | Keep `PRESET=163` (`imap_id_mode=always`).                                                                                      |
+| 163 SEARCH returns nothing             | Expected; local search + encrypted cache. Confirm `MCP_EMAIL_CACHE_KEY` if you want the cache.                                  |
+| `tool_unavailable`                     | Tool is denied (`MCP_EMAIL_SERVER_TOOL_DENY` / allowlist) or `email_command` without `allow_protocol_commands`.                 |
+| Send / reply / forward denied          | Empty recipient allowlist denies all. Set `MCP_EMAIL_SERVER_ALLOWED_RECIPIENTS`.                                                |
+| Attachment path rejected               | Outgoing files must sit inside `MCP_EMAIL_SERVER_ATTACHMENT_DIR`. Forwarded IMAP parts are not subject to that directory.       |
 | Draft still in Drafts after send_draft | Default `MCP_EMAIL_SERVER_SEND_DRAFT=safe` keeps the draft unless a Sent copy was saved. Set `delete` or enable `save_to_sent`. |
-| Cache search empty after key change | Wipe the cache; old ciphertext cannot be read with a new key. |
-| Read-only root FS write errors | Data belongs on `/data` and `/tmp` (tmpfs). Do not write under `/app`. |
+| Cache search empty after key change    | Wipe the cache; old ciphertext cannot be read with a new key.                                                                   |
+| Read-only root FS write errors         | Data belongs on `/data` and `/tmp` (tmpfs). Do not write under `/app`.                                                          |
 
-| 现象 | 排查 |
-| --- | --- |
-| 容器立刻退出 | HTTP 未配置令牌。设置 `MCP_EMAIL_HTTP_BEARER_TOKEN`。 |
-| `/healthz` 正常，MCP 客户端 401 | Bearer 缺失或错误。用 `MCP_EMAIL_HTTP_BEARER_TOKENS` 轮换。 |
-| 客户端报 Host 无效 | 把 MagicDNS / tailnet IP / 局域网 `host:port` 加入 `MCP_ALLOWED_HOSTS`。 |
-| 163 能 LOGIN 随后失败 | 保持 `PRESET=163`（始终发 IMAP ID）。 |
-| 163 SEARCH 为空 | 预期行为；用本地搜索 + 加密缓存。 |
-| `tool_unavailable` | 工具被 allow/deny 排除，或未给账号打开 `email_command`。 |
-| send_draft 后草稿还在 | 默认 `MCP_EMAIL_SERVER_SEND_DRAFT=safe`：只有成功写入已发送时才删草稿。需要的话设 `delete` 或打开 `save_to_sent`。 |
-| 发信/回复/转发被拒 | 空收件人白名单默认拒绝。设置 `MCP_EMAIL_SERVER_ALLOWED_RECIPIENTS`。 |
-| 附件路径被拒 | 本地附件必须在 `MCP_EMAIL_SERVER_ATTACHMENT_DIR` 内。转发原信的 IMAP 附件不受该目录限制。 |
-| 换密钥后缓存搜索为空 | 清空缓存；旧密文不能用新密钥读。 |
-| 只读根文件系统写失败 | 数据写 `/data` 和 `/tmp`（tmpfs），不要写 `/app`。 |
+| 现象                            | 排查                                                                                                               |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| 容器立刻退出                    | HTTP 未配置令牌。设置 `MCP_EMAIL_HTTP_BEARER_TOKEN`。                                                              |
+| `/healthz` 正常，MCP 客户端 401 | Bearer 缺失或错误。用 `MCP_EMAIL_HTTP_BEARER_TOKENS` 轮换。                                                        |
+| 客户端报 Host 无效              | 把 MagicDNS / tailnet IP / 局域网 `host:port` 加入 `MCP_ALLOWED_HOSTS`。                                           |
+| 163 能 LOGIN 随后失败           | 保持 `PRESET=163`（始终发 IMAP ID）。                                                                              |
+| 163 SEARCH 为空                 | 预期行为；用本地搜索 + 加密缓存。                                                                                  |
+| `tool_unavailable`              | 工具被 allow/deny 排除，或未给账号打开 `email_command`。                                                           |
+| send_draft 后草稿还在           | 默认 `MCP_EMAIL_SERVER_SEND_DRAFT=safe`：只有成功写入已发送时才删草稿。需要的话设 `delete` 或打开 `save_to_sent`。 |
+| 发信/回复/转发被拒              | 空收件人白名单默认拒绝。设置 `MCP_EMAIL_SERVER_ALLOWED_RECIPIENTS`。                                               |
+| 附件路径被拒                    | 本地附件必须在 `MCP_EMAIL_SERVER_ATTACHMENT_DIR` 内。转发原信的 IMAP 附件不受该目录限制。                          |
+| 换密钥后缓存搜索为空            | 清空缓存；旧密文不能用新密钥读。                                                                                   |
+| 只读根文件系统写失败            | 数据写 `/data` 和 `/tmp`（tmpfs），不要写 `/app`。                                                                 |
 
 More protocol-level notes: [troubleshooting.md](troubleshooting.md),
 [security.md](security.md), [transports.md](transports.md).

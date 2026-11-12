@@ -30,8 +30,8 @@ cp docker-compose.example.yml docker-compose.yml
 docker compose build && docker compose up -d
 ```
 
-MCP endpoint: `http://<tailscale-name>:9557/mcp`  
-Header: `Authorization: Bearer <token>`  
+MCP endpoint: `http://<tailscale-name>:9557/mcp`
+Header: `Authorization: Bearer <token>`
 Liveness: `GET /healthz` (no auth)
 
 Locally:

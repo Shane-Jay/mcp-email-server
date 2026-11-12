@@ -44,8 +44,7 @@ def resolve_allowed_attachment_path(file_path: str, allowlist: Path | None = Non
         allowed_root = root.resolve(strict=True)
     except OSError as exc:
         raise AttachmentPathError(
-            "Attachment allowlist directory is missing or unreadable; "
-            f"set {_ENV} to an existing directory"
+            f"Attachment allowlist directory is missing or unreadable; set {_ENV} to an existing directory"
         ) from exc
     if not allowed_root.is_dir():
         raise AttachmentPathError(f"Attachment allowlist {_ENV} is not a directory")

@@ -193,16 +193,16 @@ mcp-email-server streamable-http
 
 Explicit `--host` and `--port` options override those defaults.
 
-| Variable                              | Default             | Description                                   |
-| ------------------------------------- | ------------------- | --------------------------------------------- |
-| `MCP_HOST`                            | `localhost`         | Bind host for Streamable HTTP.                |
-| `MCP_PORT`                            | `9557`              | Bind port for Streamable HTTP.                |
-| `MCP_ALLOWED_HOSTS`                   | Derived safe values | Comma-separated allowed HTTP `Host` values.   |
-| `MCP_ALLOWED_ORIGINS`                 | Derived safe values | Comma-separated allowed HTTP `Origin` values. |
-| `MCP_ENABLE_DNS_REBINDING_PROTECTION` | `true`              | Enable `Host` and `Origin` validation.        |
-| `MCP_EMAIL_HTTP_BEARER_TOKEN`         | unset               | Required Bearer token for SSE and Streamable HTTP. |
-| `MCP_EMAIL_HTTP_BEARER_TOKENS`        | unset               | Comma-separated extra tokens for rotation.    |
-| `MCP_EMAIL_HTTP_BEARER_TOKEN_FILE`    | unset               | Read the token from a secret file (mode 0600). |
+| Variable                              | Default             | Description                                             |
+| ------------------------------------- | ------------------- | ------------------------------------------------------- |
+| `MCP_HOST`                            | `localhost`         | Bind host for Streamable HTTP.                          |
+| `MCP_PORT`                            | `9557`              | Bind port for Streamable HTTP.                          |
+| `MCP_ALLOWED_HOSTS`                   | Derived safe values | Comma-separated allowed HTTP `Host` values.             |
+| `MCP_ALLOWED_ORIGINS`                 | Derived safe values | Comma-separated allowed HTTP `Origin` values.           |
+| `MCP_ENABLE_DNS_REBINDING_PROTECTION` | `true`              | Enable `Host` and `Origin` validation.                  |
+| `MCP_EMAIL_HTTP_BEARER_TOKEN`         | unset               | Required Bearer token for SSE and Streamable HTTP.      |
+| `MCP_EMAIL_HTTP_BEARER_TOKENS`        | unset               | Comma-separated extra tokens for rotation.              |
+| `MCP_EMAIL_HTTP_BEARER_TOKEN_FILE`    | unset               | Read the token from a secret file (mode 0600).          |
 | `MCP_EMAIL_HTTP_INSECURE`             | `false`             | Allow HTTP without a token (isolated development only). |
 
 ## Bearer-token authentication

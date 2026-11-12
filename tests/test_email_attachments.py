@@ -1256,9 +1256,7 @@ class TestForwardedPartSerialization:
                 "---------- Forwarded message ----------\nFrom: Ada\nRecipients: Me\nSubject: Photo\n\nHi",
                 extra_parts=[part],
             )
-        payloads = [
-            item.get_payload(decode=True) for item in message.walk() if item.get_filename() == "photo.jpg"
-        ]
+        payloads = [item.get_payload(decode=True) for item in message.walk() if item.get_filename() == "photo.jpg"]
         assert b"imap-bytes-not-from-disk" in payloads
 
     def test_rfc2231_filename_bytes_are_identical_across_send_paths(self, email_client):

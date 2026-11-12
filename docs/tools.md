@@ -523,15 +523,15 @@ as `utf8-append-unsupported` without changing the successful SMTP outcome.
 Replies to an existing message through `send_email`, so recipient allowlist,
 attachments, Sent-copy, and mutation grants stay the same.
 
-| Parameter      | Default  | Description                                                                 |
-| -------------- | -------- | --------------------------------------------------------------------------- |
-| `account_name` | Required | Configured account identifier.                                              |
-| `email_id`     | Required | UID of the message to reply to.                                             |
-| `body`         | Required | Reply text placed above a quoted original (plain text unless `html=true`).  |
-| `mailbox`      | `INBOX`  | Mailbox containing the original.                                            |
-| `reply_all`    | `false`  | If true, CC original To/Cc recipients except this account.                  |
-| `cc` / `bcc`   | None     | Extra recipients; still filtered by the allowlist.                          |
-| `attachments`  | None     | Extra local files from the attachment allowlist directory when configured.  |
+| Parameter      | Default  | Description                                                                |
+| -------------- | -------- | -------------------------------------------------------------------------- |
+| `account_name` | Required | Configured account identifier.                                             |
+| `email_id`     | Required | UID of the message to reply to.                                            |
+| `body`         | Required | Reply text placed above a quoted original (plain text unless `html=true`). |
+| `mailbox`      | `INBOX`  | Mailbox containing the original.                                           |
+| `reply_all`    | `false`  | If true, CC original To/Cc recipients except this account.                 |
+| `cc` / `bcc`   | None     | Extra recipients; still filtered by the allowlist.                         |
+| `attachments`  | None     | Extra local files from the attachment allowlist directory when configured. |
 
 The subject is `Re: <original>` without stacking a second `Re:`. `In-Reply-To`
 and `References` are set from the original Message-ID. A missing Message-ID
@@ -544,12 +544,12 @@ draft's To header and still must match the recipient allowlist. Default mailbox
 is `Drafts`. After a clean send, `MCP_EMAIL_SERVER_SEND_DRAFT` chooses what
 happens to the original draft:
 
-| Value | Behaviour |
-| --- | --- |
-| `safe` (default) | Delete the draft only when this server successfully APPENDed a Sent copy. If Sent-copy is skipped or failed, keep the draft. |
-| `delete` | Always delete the draft after a clean send. |
-| `move` | Move the draft to Sent when no Sent copy was saved; if a Sent copy already succeeded, delete the draft instead of duplicating it. |
-| `keep` | Leave the draft in place. |
+| Value            | Behaviour                                                                                                                         |
+| ---------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `safe` (default) | Delete the draft only when this server successfully APPENDed a Sent copy. If Sent-copy is skipped or failed, keep the draft.      |
+| `delete`         | Always delete the draft after a clean send.                                                                                       |
+| `move`           | Move the draft to Sent when no Sent copy was saved; if a Sent copy already succeeded, delete the draft instead of duplicating it. |
+| `keep`           | Leave the draft in place.                                                                                                         |
 
 Providers that auto-save Sent on SMTP submit should use `delete` (or `safe` plus
 `save_to_sent=true`) so the draft does not linger. A failed delete/move leaves

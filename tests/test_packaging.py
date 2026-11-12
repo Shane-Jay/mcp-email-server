@@ -433,7 +433,7 @@ def test_isolated_wheel_and_local_uvx_serve_authenticated_ui(tmp_path: Path) -> 
         _stop_ui(release_process, release_terminal)
 
 
-def test_container_security_workflow_scans_selected_and_published_runtime_images() -> None:
+def test_container_security_workflow_scans_runtime_image_from_selected_commit() -> None:
     workflow_path = REPOSITORY / ".github/workflows/container-security.yml"
     workflow = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
     events = workflow[True]  # PyYAML interprets the YAML 1.1 key "on" as True.
@@ -441,26 +441,33 @@ def test_container_security_workflow_scans_selected_and_published_runtime_images
     assert events["schedule"] == [{"cron": "17 4 * * 1"}]
     assert "workflow_dispatch" in events
     assert "pull_request" not in events
-    assert workflow["permissions"] == {"contents": "read", "security-events": "write"}
+    expected_permissions = {
+        "contents": "read",
+        "actions": "read",
+        "security-events": "write",
+    }
+    assert workflow["permissions"] == expected_permissions
+    assert _workflow_job(workflow_path, "scan")["permissions"] == expected_permissions
 
     steps = _workflow_steps(workflow_path, "scan")
     build = next(step for step in steps if step.get("name") == "Build runtime image from selected commit")
-    assert build["if"] == "github.event_name != 'schedule'"
+    assert "if" not in build
     assert build["run"] == "docker build --pull --tag mcp-email-server:security ."
     scan = next(step for step in steps if str(step.get("uses", "")).startswith("aquasecurity/trivy-action@"))
     options = scan["with"]
-    assert "ghcr.io/wh1isper/mcp-email-server:latest" in options["image-ref"]
-    assert "mcp-email-server:security" in options["image-ref"]
+    assert options["image-ref"] == "mcp-email-server:security"
+    assert "wh1isper" not in options["image-ref"]
     assert options["scan-type"] == "image"
     assert options["scanners"] == "vuln"
     assert options["severity"] == "HIGH,CRITICAL"
     assert options["limit-severities-for-sarif"] is True
     assert options["ignore-unfixed"] is True
     assert options["exit-code"] == "0"
+    artifact = next(step for step in steps if step.get("name") == "Upload SARIF artifact")
+    assert artifact["uses"] == "actions/upload-artifact@v4"
     upload = next(step for step in steps if step.get("uses") == "github/codeql-action/upload-sarif@v4")
     assert upload["with"]["sarif_file"] == options["output"]
-    assert "container-published" in upload["with"]["category"]
-    assert "container-main-build" in upload["with"]["category"]
+    assert upload["with"]["category"] == "container-main-build"
 
 
 def test_ci_and_release_use_the_same_exact_artifact_verification_path() -> None:
@@ -486,42 +493,35 @@ def test_ci_and_release_use_the_same_exact_artifact_verification_path() -> None:
     assert release_container_check in validation_runs
     assert validation_runs.index(release_container_check) < validation_runs.index("make build")
     assert validation_runs.index("make build") < validation_runs.index("make verify-dist")
-    publish_runs = _workflow_job_runs(release, "publish")
-    assert publish_runs == ["sha256sum --check dist.sha256", "uv publish dist/*"]
-    publish = _workflow_job(release, "publish")
-    release_dependencies = {
-        "verify-release-source",
-        "release-python-matrix",
-        "release-validation-and-build",
-    }
-    assert set(publish["needs"]) == release_dependencies  # type: ignore[arg-type]
 
-    publish_container = _workflow_job(release, "publish-container")
-    assert set(publish_container["needs"]) == release_dependencies  # type: ignore[arg-type]
-    assert publish_container["permissions"] == {"contents": "read", "packages": "write"}
-    container_steps = _workflow_steps(release, "publish-container")
-    container_actions = {step.get("uses") for step in container_steps if step.get("uses")}
-    assert {
-        "actions/checkout@v6",
-        "docker/setup-qemu-action@v3",
-        "docker/setup-buildx-action@v3",
-        "docker/login-action@v3",
-        "docker/metadata-action@v5",
-        "docker/build-push-action@v6",
-    } <= container_actions
-    container_build = next(step for step in container_steps if step.get("uses") == "docker/build-push-action@v6")
-    container_options = container_build["with"]
-    assert isinstance(container_options, dict)
-    assert container_options["platforms"] == "linux/amd64,linux/arm64"
-    assert container_options["push"] is True
-    metadata = next(step for step in container_steps if step.get("uses") == "docker/metadata-action@v5")
+    release_jobs = yaml.safe_load(release.read_text(encoding="utf-8"))["jobs"]
+    assert "publish" not in release_jobs
+    assert "publish-container" not in release_jobs
+    release_text = release.read_text(encoding="utf-8")
+    assert "uv publish" not in release_text
+    assert "PYPI_TOKEN" not in release_text
+    assert "ghcr.io/wh1isper" not in release_text
+
+    image_workflow = REPOSITORY / ".github/workflows/publish-image.yml"
+    image_steps = _workflow_steps(image_workflow, "build-and-push")
+    metadata = next(step for step in image_steps if step.get("uses") == "docker/metadata-action@v5")
     metadata_options = metadata["with"]
     assert isinstance(metadata_options, dict)
-    assert metadata_options["images"] == "ghcr.io/wh1isper/mcp-email-server"
+    assert metadata_options["images"] == "ghcr.io/${{ github.repository }}"
+    image_build = next(step for step in image_steps if step.get("uses") == "docker/build-push-action@v6")
+    image_options = image_build["with"]
+    assert isinstance(image_options, dict)
+    assert image_options["platforms"] == "linux/amd64,linux/arm64"
+    assert image_options["push"] is True
+
+    docs_workflow = yaml.safe_load((REPOSITORY / ".github/workflows/docs.yml").read_text(encoding="utf-8"))
+    assert "deploy" not in docs_workflow["jobs"]
+    docs_text = (REPOSITORY / ".github/workflows/docs.yml").read_text(encoding="utf-8")
+    assert "CLOUDFLARE" not in docs_text
+    assert "wrangler pages deploy" not in docs_text
 
     workflow = yaml.safe_load(release.read_text(encoding="utf-8"))
     assert workflow["permissions"] == {"contents": "read"}
-    assert publish["permissions"] == {"contents": "write"}
     for job_name in ("verify-release-source", "release-python-matrix", "release-validation-and-build"):
         assert _workflow_job(release, job_name).get("permissions", {"contents": "read"}) != {"contents": "write"}
 
@@ -541,7 +541,7 @@ def test_ci_and_release_use_the_same_exact_artifact_verification_path() -> None:
 
     expected_ref = "${{ needs.verify-release-source.outputs.release_sha }}"
     stamp_command = 'python3 dev/set_release_version.py "${{ needs.verify-release-source.outputs.release_version }}"'
-    for job_name in ("release-python-matrix", "release-validation-and-build", "publish-container"):
+    for job_name in ("release-python-matrix", "release-validation-and-build"):
         steps = _workflow_steps(release, job_name)
         checkout = next(step for step in steps if step.get("uses") == "actions/checkout@v6")
         options = checkout["with"]
@@ -555,10 +555,8 @@ def test_ci_and_release_use_the_same_exact_artifact_verification_path() -> None:
             "verify-release-source",
             "release-python-matrix",
             "release-validation-and-build",
-            "publish",
-            "publish-container",
         )
         for command in _workflow_job_runs(release, job_name)
     ]
-    assert sum("set_release_version" in command for command in release_commands) == 4
+    assert sum("set_release_version" in command for command in release_commands) == 3
     assert "uv lock" not in release_commands

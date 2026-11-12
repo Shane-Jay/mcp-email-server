@@ -22,5 +22,6 @@ repos:
         name: prettier
         entry: prettier --write --ignore-unknown
         language: node
+        language_version: system
         additional_dependencies: [prettier@3.8.3]
         types_or: [json, yaml, markdown]
