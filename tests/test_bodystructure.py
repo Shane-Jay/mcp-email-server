@@ -145,3 +145,25 @@ async def test_fetch_draft_source_preserves_html_cc_bcc_and_pdf() -> None:
     assert attachment["filename"] == "note.pdf"
     assert attachment["content_type"] == "application/pdf"
     assert attachment["payload"] == b"%PDF-1.4 test"
+
+
+def test_inline_literals_in_bodystructure_are_folded_back() -> None:
+    from mcp_email_server.emails.classic import _extract_bodystructure, _inline_non_header_literals
+
+    name = "测试附件.pdf".encode()
+    data = [
+        b'72 FETCH (UID 99 FLAGS (\\Seen) BODYSTRUCTURE (("text" "plain" ("charset" "utf-8") NIL NIL "7bit" 5 1) '
+        b'("application" "pdf" ("name" {' + str(len(name)).encode() + b"}",
+        bytearray(name),
+        b' "x") NIL NIL "base64" 100) "mixed" ("boundary" "b")) BODY[HEADER]<0> {10}',
+        bytearray(b"Subject: x"),
+        b")",
+        b"Fetch completed",
+    ]
+    merged = _inline_non_header_literals(data)
+    assert [type(item).__name__ for item in merged] == ["bytes", "bytearray", "bytes", "bytes"]
+    assert b"BODY[HEADER]<0> {10}" in merged[0]
+    assert b"UID 99" in merged[0]
+    names, info = attachments_from_bodystructure(_extract_bodystructure([merged[0]]))
+    assert names == ["测试附件.pdf"]
+    assert info[0]["content_type"] == "application/pdf"

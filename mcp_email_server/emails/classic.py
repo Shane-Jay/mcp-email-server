@@ -1089,6 +1089,44 @@ def attachments_from_bodystructure(structure: Any) -> tuple[list[str], list[dict
     return names, info
 
 
+_LITERAL_MARKER_TAIL = re.compile(rb"\{\d+\+?\}\s*$")
+_HEADER_LITERAL_TAIL = re.compile(rb"BODY\[HEADER[^\]]*\](?:<[^>]*>)?\s*\{\d+\+?\}\s*$", re.IGNORECASE)
+
+
+def _inline_non_header_literals(data: Sequence[Any]) -> list[Any]:
+    """Fold IMAP literals other than the header payload back into quoted strings.
+
+    Servers may emit ``BODYSTRUCTURE`` parameters (for example non-ASCII
+    filenames) as literals, which splits one FETCH response into several
+    ``aioimaplib`` items. Only the literal that follows ``BODY[HEADER]`` stays a
+    separate bytearray; every other literal is re-quoted and joined with the
+    text that follows it so one message is still one item plus its header.
+    """
+    out: list[Any] = []
+    index = 0
+    while index < len(data):
+        item = data[index]
+        previous = out[-1] if out else None
+        if (
+            isinstance(item, bytearray)
+            and isinstance(previous, bytes)
+            and _LITERAL_MARKER_TAIL.search(previous)
+            and not _HEADER_LITERAL_TAIL.search(previous)
+        ):
+            out.pop()
+            quoted = bytes(item).replace(b"\\", b"\\\\").replace(b'"', b'\\"')
+            quoted = quoted.replace(b"\r", b" ").replace(b"\n", b" ")
+            merged = _LITERAL_MARKER_TAIL.sub(b"", previous) + b'"' + quoted + b'"'
+            if index + 1 < len(data) and isinstance(data[index + 1], bytes):
+                merged += data[index + 1]
+                index += 1
+            out.append(merged)
+        else:
+            out.append(item)
+        index += 1
+    return out
+
+
 def _extract_bodystructure(protocol_items: Sequence[bytes]) -> Any | None:
     """Parse ``BODYSTRUCTURE`` from FETCH protocol lines surrounding one UID."""
     blob = b" ".join(item for item in protocol_items if isinstance(item, bytes))
@@ -2198,7 +2236,7 @@ class EmailClient:
             uid_list = ",".join(chunk)
             response = await imap.uid("fetch", uid_list, fetch_item)
             _raise_for_imap_command_failure(response, f"FETCH headers for {len(chunk)} UIDs")
-            _, data = response
+            data = _inline_non_header_literals(response[1])
             for i, item in enumerate(data):
                 if not isinstance(item, bytes) or b"BODY[HEADER]" not in item:
                     continue
