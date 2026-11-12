@@ -5,9 +5,11 @@
 # Pin the image by digest in production, for example:
 #   image: ghcr.io/shane-jay/mcp-email-server@sha256:<digest>
 #
-# Host port 9557 is published only on MCP_BIND_IP (Tailscale CGNAT IP by
-# default), never on 0.0.0.0. The process still binds 0.0.0.0 inside the
-# container so the healthcheck can use 127.0.0.1.
+# Access mode is selected in .env (compose cannot compute it):
+#   lan   (default): MCP_BIND_IP=0.0.0.0  — LAN and WireGuard-routed subnets
+#   local:           MCP_BIND_IP=127.0.0.1 — NAS loopback only
+# The process still binds 0.0.0.0 *inside* the container so the healthcheck
+# can use 127.0.0.1. Docker publishes the host port only on MCP_BIND_IP.
 
 services:
   mcp-email:
@@ -30,7 +32,7 @@ services:
       MCP_EMAIL_SERVER_ACCOUNT_aliyun_PASSWORD_FILE: /run/secrets/aliyun_auth_code
       MCP_EMAIL_SERVER_ACCOUNT_icloud_PASSWORD_FILE: /run/secrets/icloud_app_password
     ports:
-      - "${MCP_BIND_IP:-100.64.0.1}:9557:9557"
+      - "${MCP_BIND_IP:-0.0.0.0}:9557:9557"
     volumes:
       - ${MCP_DATA_DIR:-/volume1/docker/mcp-email-server/data}:/data
       - ${MCP_CACHE_DIR:-/volume1/docker/mcp-email-server/cache}:/data/cache

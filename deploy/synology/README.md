@@ -1,11 +1,16 @@
 # Synology NAS deploy kit / 群晖部署包
 
-Reviewed compose kit for one Streamable HTTP container on a Synology NAS,
-reached only over Tailscale (or another private overlay). No real secrets
+Reviewed compose kit for one Streamable HTTP container on a Synology NAS.
+Default access mode is **LAN** (`0.0.0.0`): home LAN clients and devices that
+arrive through the owner's WireGuard (routed subnets, for example
+`192.168.1.0/24` and `10.8.0.0/24`) can reach port 9557. Switch to
+**local** (`127.0.0.1`) to listen on the NAS itself only. No real secrets
 are stored in this directory.
 
-这份 compose 套件在群晖上跑一个 Streamable HTTP 容器，只通过 Tailscale
-（或其他私有网络）访问。目录里没有任何真实口令。
+这份 compose 套件在群晖上跑一个 Streamable HTTP 容器。默认 **lan** 模式绑定
+`0.0.0.0`，家里局域网以及经 WireGuard 路由进来的网段（例如 `192.168.1.0/24`、
+`10.8.0.0/24`）都能访问 9557。改成 **local** 则只监听本机回环。目录里没有
+任何真实口令。
 
 Image: `ghcr.io/shane-jay/mcp-email-server:latest`. Pin by digest after the
 first pull:
@@ -16,6 +21,60 @@ first pull:
 docker inspect --format='{{index .RepoDigests 0}}' ghcr.io/shane-jay/mcp-email-server:latest
 # then set image: ghcr.io/shane-jay/mcp-email-server@sha256:...
 ```
+
+LAN traffic to this container is **plain HTTP**. Prefer reaching it through
+WireGuard, or put Synology Reverse Proxy (HTTPS) in front. Do not publish
+port 9557 on the public internet.
+
+局域网到本容器是 **明文 HTTP**。更稳妥的做法是走 WireGuard，或在前面加群晖反代
+HTTPS。不要把 9557 映射到公网。
+
+## Access mode / 访问模式
+
+Compose v2 / Container Manager cannot compute bind addresses. Set
+**both** `MCP_ACCESS_MODE` and `MCP_BIND_IP` to a matching pair in `.env`.
+The server also reads `MCP_ACCESS_MODE`: `lan` and `local` refuse
+`MCP_EMAIL_HTTP_INSECURE=true` and require a bearer token. `lan` additionally
+requires a non-wildcard `MCP_ALLOWED_HOSTS` list, with DNS-rebinding
+protection left on.
+
+群晖 Container Manager 不能根据模式自动算出绑定地址。请在 `.env` 里把
+`MCP_ACCESS_MODE` 和 `MCP_BIND_IP` **成对**填好。服务端也会读
+`MCP_ACCESS_MODE`：`lan` / `local` 都拒绝关闭鉴权，且必须有 Bearer。`lan`
+还要求明确的 `MCP_ALLOWED_HOSTS`（不能是 `*`），并保持 DNS 重绑定防护。
+
+### `lan` (default)
+
+```bash
+MCP_ACCESS_MODE=lan
+MCP_BIND_IP=0.0.0.0
+MCP_ALLOWED_HOSTS=192.168.1.50:9557,nas.local:9557
+MCP_ENABLE_DNS_REBINDING_PROTECTION=true
+MCP_EMAIL_HTTP_INSECURE=false
+```
+
+Replace `192.168.1.50` and `nas.local` with this NAS LAN IP and hostname
+(the `Host` header the MCP client will send). Routed WireGuard clients use
+the same Host values; you do not list client subnets here.
+
+把 `192.168.1.50` 和 `nas.local` 换成这台 NAS 的局域网 IP 和主机名（客户端
+Host 头）。WireGuard 对端连过来时 Host 仍是 NAS 的地址，不要把客户端网段写进
+`MCP_ALLOWED_HOSTS`。
+
+### `local`
+
+```bash
+MCP_ACCESS_MODE=local
+MCP_BIND_IP=127.0.0.1
+MCP_ALLOWED_HOSTS=127.0.0.1:9557,localhost:9557
+MCP_ENABLE_DNS_REBINDING_PROTECTION=true
+MCP_EMAIL_HTTP_INSECURE=false
+```
+
+CLI alternative: `docker compose -f docker-compose.yml -f compose.local.yml up -d`.
+Container Manager users should change `.env` instead of extra compose files.
+
+命令行也可用 `compose.local.yml` 覆盖端口。套件中心用户改 `.env` 即可。
 
 ## 1. Create folders / 建目录
 
@@ -78,16 +137,16 @@ chmod 600 .env
 
 Edit `.env`:
 
-- `MCP_BIND_IP` — NAS Tailscale IP (`100.x`), **not** `0.0.0.0`
-- `MCP_ALLOWED_HOSTS` — MagicDNS name and that same tailnet IP
+- `MCP_ACCESS_MODE` / `MCP_BIND_IP` — matching pair (`lan`/`0.0.0.0` or `local`/`127.0.0.1`)
+- `MCP_ALLOWED_HOSTS` — NAS LAN IP:port and hostname the client will send
 - `MCP_EMAIL_SERVER_ACCOUNT_*_EMAIL_ADDRESS` — the three placeholder addresses
 - `MCP_EMAIL_SERVER_ALLOWED_RECIPIENTS` — who the tools may send to
 
 Do not put the bearer token or mailbox passwords in `.env`. Compose points
-`*_FILE` at `/run/secrets/...`.
+`*_FILE` at `/run/secrets/...`. Leave `MCP_EMAIL_HTTP_INSECURE=false`.
 
 不要把 Bearer 令牌或邮箱口令写进 `.env`。compose 会把 `*_FILE` 指到
-`/run/secrets/...`。
+`/run/secrets/...`。不要打开 `MCP_EMAIL_HTTP_INSECURE`。
 
 Optional: `cp config.example.toml /volume1/docker/mcp-email-server/data/config.toml`
 if you want a TOML overlay. Accounts still come from env + secret files.
@@ -109,14 +168,14 @@ mount Docker secrets, use the SSH commands above.
 
 ## 6. Verify / 验证
 
-Replace the host with your MagicDNS name or tailnet IP:
+Replace the host with this NAS LAN IP or hostname (`lan`), or `127.0.0.1`
+(`local`):
 
-把主机换成你的 MagicDNS 名或 tailnet IP：
+把主机换成 NAS 局域网 IP / 主机名（`lan`），或 `127.0.0.1`（`local`）：
 
 ```bash
-curl -fsS "http://nas.tail-xxxx.ts.net:9557/healthz"
-# from this repository:
-scripts/smoke.sh "http://nas.tail-xxxx.ts.net:9557" ./secrets/http_bearer_token
+curl -fsS "http://192.168.1.50:9557/healthz"
+scripts/smoke.sh "http://192.168.1.50:9557" ./secrets/http_bearer_token
 ```
 
 `/healthz` is unauthenticated. `tools/list` requires
@@ -124,20 +183,31 @@ scripts/smoke.sh "http://nas.tail-xxxx.ts.net:9557" ./secrets/http_bearer_token
 
 `/healthz` 不需要令牌。`tools/list` 需要 Bearer。`scripts/smoke.sh` 会做这两步。
 
-Manual `tools/list` (same handshake the smoke script performs):
+MCP clients use `http://<NAS-LAN-IP-or-hostname>:9557/mcp` with that bearer
+token. Do not run the management UI in this container.
 
-```bash
-TOKEN=$(tr -d '\n' < secrets/http_bearer_token)
-curl -fsS "http://nas.tail-xxxx.ts.net:9557/healthz"
-```
+不要在此容器里启动管理 UI。
 
-MCP clients use `http://<MagicDNS-or-IP>:9557/mcp` with that bearer token.
-Do not publish port 9557 on the public internet. Do not run the management UI
-in this container.
+## 7. HTTPS via Synology Reverse Proxy / 群晖反代 HTTPS（可选）
 
-不要把 9557 映射到公网。不要在此容器里启动管理 UI。
+Port 9557 on the LAN is still HTTP. For TLS, keep `MCP_ACCESS_MODE=local` /
+`MCP_BIND_IP=127.0.0.1` and terminate HTTPS on DSM:
 
-## 7. Rotate the HTTP token / 轮换令牌
+1. Control Panel → Login Portal → Advanced → Reverse Proxy → Create.
+2. Source: HTTPS, hostname such as `mcp.nas.local`, port `443`.
+3. Destination: `http://127.0.0.1:9557`.
+4. Add that hostname to `MCP_ALLOWED_HOSTS` (and `MCP_ALLOWED_ORIGINS` if a
+   browser client sends Origin).
+
+Then point MCP clients at `https://mcp.nas.local/mcp` with the same bearer
+token. WireGuard to the LAN IP remains the simpler path when you do not need
+a browser.
+
+局域网 9557 仍是 HTTP。若要 TLS：保持 `local` 绑定本机，用 DSM **登录门户 →
+高级 → 反向代理** 把 HTTPS 主机名转到 `http://127.0.0.1:9557`，并把该主机名
+写入 `MCP_ALLOWED_HOSTS`。不需要浏览器时，用 WireGuard 访问局域网 IP 更简单。
+
+## 8. Rotate the HTTP token / 轮换令牌
 
 1. `openssl rand -hex 32 > secrets/http_bearer_token.new`
 2. Overlap (optional): put both values in `.env` as
@@ -154,11 +224,12 @@ container, empty `/volume1/docker/mcp-email-server/cache`, then start again.
 
 ## Hardening already in compose / compose 已做的加固
 
-- Host bind: `${MCP_BIND_IP}:9557`, default `100.64.0.1`
+- Access mode pair: `MCP_ACCESS_MODE` + `MCP_BIND_IP` (default lan / `0.0.0.0`)
+- Bearer token required; `MCP_EMAIL_HTTP_INSECURE=false`
 - `user: "1000:1000"`, `read_only: true`, `tmpfs` on `/tmp`
 - `cap_drop: ALL`, `security_opt: no-new-privileges:true`
 - Healthcheck against `/healthz`
-- IMAP pool on, `SEND_DRAFT=safe`, conservative `TOOL_ALLOW`
+- IMAP pool on, `SEND_DRAFT=safe`, conservative `TOOL_ALLOW`, recipient allowlist
 - Attachment directory bind-mounted at `/data/attachments`
 
 See also `docs/OPERATIONS.md` in the repository root.

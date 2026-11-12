@@ -1,0 +1,12 @@
+# Optional override for CLI users:
+#   docker compose -f docker-compose.yml -f compose.local.yml up -d
+#
+# Synology Container Manager interpolates .env, so the usual local switch is:
+#   MCP_ACCESS_MODE=local
+#   MCP_BIND_IP=127.0.0.1
+# in .env (no extra compose file).
+
+services:
+  mcp-email:
+    ports:
+      - "127.0.0.1:9557:9557"

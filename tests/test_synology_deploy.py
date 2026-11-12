@@ -41,7 +41,7 @@ def _load_compose() -> dict[str, object]:
     return loaded
 
 
-def test_synology_compose_is_hardened_and_not_publicly_bound() -> None:
+def test_synology_compose_is_hardened_and_defaults_to_lan_bind() -> None:
     compose = _load_compose()
     services = compose["services"]
     assert isinstance(services, dict)
@@ -58,8 +58,14 @@ def test_synology_compose_is_hardened_and_not_publicly_bound() -> None:
     assert any(str(entry).startswith(_TMPFS_PREFIX) and "uid=1000" in str(entry) for entry in tmpfs)
     ports = service["ports"]
     assert isinstance(ports, list)
-    assert ports == ["${MCP_BIND_IP:-100.64.0.1}:9557:9557"]
-    assert _WILDCARD_BIND not in str(ports)
+    assert ports == [f"${{MCP_BIND_IP:-{_WILDCARD_BIND}}}:9557:9557"]
+    local_override = yaml.safe_load((KIT / "compose.local.yml").read_text(encoding="utf-8"))
+    assert isinstance(local_override, dict)
+    local_services = local_override["services"]
+    assert isinstance(local_services, dict)
+    local_service = local_services["mcp-email"]
+    assert isinstance(local_service, dict)
+    assert local_service["ports"] == ["127.0.0.1:9557:9557"]
     volumes = service["volumes"]
     assert isinstance(volumes, list)
     joined = "\n".join(str(item) for item in volumes)
@@ -102,9 +108,15 @@ def test_synology_env_example_uses_presets_and_secret_files() -> None:
         assert _INLINE_PASSWORD.match(stripped) is None
         assert _HEX_SECRET.search(value) is None
 
-    assert values["MCP_BIND_IP"] == "100.64.0.1"
-    assert _WILDCARD_BIND not in values["MCP_BIND_IP"]
-    assert "nas.tail-xxxx.ts.net" in values["MCP_ALLOWED_HOSTS"]
+    assert values["MCP_ACCESS_MODE"] == "lan"
+    assert values["MCP_BIND_IP"] == _WILDCARD_BIND
+    assert "127.0.0.1" in text
+    assert "MCP_ACCESS_MODE=local" in text
+    assert values["MCP_ALLOWED_HOSTS"] == "192.168.1.50:9557,nas.local:9557"
+    assert values["MCP_ENABLE_DNS_REBINDING_PROTECTION"] == "true"
+    assert values["MCP_EMAIL_HTTP_INSECURE"] == "false"
+    assert "nas.tail-xxxx.ts.net" not in text
+    assert "100.64." not in values["MCP_ALLOWED_HOSTS"]
     assert values["MCP_EMAIL_SERVER_IMAP_POOL"] == "true"
     assert values["MCP_EMAIL_SERVER_SEND_DRAFT"] == "safe"
     allow = values["MCP_EMAIL_SERVER_TOOL_ALLOW"].split(",")
@@ -161,9 +173,18 @@ def test_synology_readme_covers_required_steps_in_english_and_chinese() -> None:
         "scripts/smoke.sh",
         "tools/list",
         "MCP_EMAIL_HTTP_BEARER_TOKENS",
+        "MCP_ACCESS_MODE=lan",
+        f"MCP_BIND_IP={_WILDCARD_BIND}",
+        "MCP_ACCESS_MODE=local",
+        "MCP_BIND_IP=127.0.0.1",
+        "plain HTTP",
+        "Reverse Proxy",
+        "WireGuard",
         "群晖",
         "授权码",
         "轮换",
+        "明文 HTTP",
+        "反向代理",
         "ghcr.io/shane-jay/mcp-email-server",
         "sha256",
     ):

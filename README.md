@@ -5,15 +5,16 @@ server. Based on [Wh1isper/mcp-email-server](https://github.com/Wh1isper/mcp-ema
 1.14.0 (BSD-3-Clause, `cb1191e4`). See [LICENSE](LICENSE), [NOTICE](NOTICE),
 and [CHANGES-vs-upstream.md](CHANGES-vs-upstream.md).
 
-Run **one container** on a NAS, talk to it over Tailscale/WireGuard as Streamable
-HTTP with a bearer token. Accounts can be env-only; the local V2 UI is optional.
-No telemetry. Do not commit real credentials.
+Run **one container** on a NAS as Streamable HTTP with a bearer token. Default
+access mode is LAN (`0.0.0.0`); switch to `local` for loopback-only. Accounts
+can be env-only; the local V2 UI is optional. No telemetry. Do not commit real
+credentials.
 
 ## Features
 
 - Multi-account IMAP/SMTP: list, search, read, reply, forward, drafts, send, move, delete
 - Bearer-token HTTP (`MCP_EMAIL_HTTP_BEARER_TOKEN`); refuses to listen without a token
-- Host allowlist for Tailscale MagicDNS / tailnet IP / LAN (`MCP_ALLOWED_HOSTS`)
+- Host allowlist for LAN IP / hostname (`MCP_ALLOWED_HOSTS`); `MCP_ACCESS_MODE=local|lan`
 - Tool allow/deny lists; `email_command` hidden and uncallable unless an account opts in
 - Recipient allowlist (empty = deny all send/reply/forward/draft)
 - Encrypted local header/body cache (AES-GCM; off unless `MCP_EMAIL_CACHE_KEY` is set)
@@ -30,7 +31,7 @@ cp docker-compose.example.yml docker-compose.yml
 docker compose build && docker compose up -d
 ```
 
-MCP endpoint: `http://<tailscale-name>:9557/mcp`
+MCP endpoint: `http://<NAS-LAN-IP-or-hostname>:9557/mcp`
 Header: `Authorization: Bearer <token>`
 Liveness: `GET /healthz` (no auth)
 
@@ -44,7 +45,7 @@ MCP_EMAIL_HTTP_BEARER_TOKEN=dev-token \
 
 Env accounts (163 / Aliyun / iCloud): see [env.example](env.example) and
 [docs/OPERATIONS.md](docs/OPERATIONS.md). A reviewed Synology compose kit
-(Docker secrets, Tailscale bind, conservative tool list) is in
+(Docker secrets, `MCP_ACCESS_MODE=local|lan`, conservative tool list) is in
 `deploy/synology/`. Presets never include passwords — use each provider's
 IMAP authorization code, not the web login.
 
@@ -72,8 +73,9 @@ make test-e2e      # GreenMail (Docker compose, or Java standalone)
 
 复制 `env.example` 为 `.env`（`chmod 600`），填写 Bearer 令牌、`MCP_ALLOWED_HOSTS`、
 收件人白名单和 163/阿里云/iCloud 授权码。详见
-[docs/OPERATIONS.md](docs/OPERATIONS.md)。只在 Tailscale/WireGuard 内网访问
-`http://<主机>:9557/mcp`。不要把 9557 或管理 UI 暴露到公网。空收件人白名单默认禁止发信。
+[docs/OPERATIONS.md](docs/OPERATIONS.md) 和 `deploy/synology/`。默认 `lan` 绑定
+`0.0.0.0`，局域网是明文 HTTP，优先走 WireGuard 或群晖反代 HTTPS。不要把 9557
+或管理 UI 暴露到公网。空收件人白名单默认禁止发信。
 
 ## Documentation
 

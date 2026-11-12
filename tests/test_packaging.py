@@ -286,6 +286,7 @@ def test_distribution_is_node_free_and_embeds_reproducible_ui(tmp_path: Path) ->
         "codecov.yaml",
         "Dockerfile",
         "deploy/synology/docker-compose.yml",
+        "deploy/synology/compose.local.yml",
         "deploy/synology/env.example",
         "deploy/synology/config.example.toml",
         "deploy/synology/README.md",

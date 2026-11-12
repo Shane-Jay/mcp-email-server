@@ -12,6 +12,7 @@ import typer
 from mcp.server.transport_security import TransportSecuritySettings
 from pydantic import SecretStr
 
+from mcp_email_server.access_mode import AccessModeError, enforce_access_mode
 from mcp_email_server.app import mcp
 from mcp_email_server.application.limits import APPLICATION_LIMITS, validate_controlled_string
 from mcp_email_server.application.management import (
@@ -201,7 +202,8 @@ def _run_authenticated_http(transport: str) -> None:
 
     try:
         auth = require_http_auth()
-    except HttpAuthError as exc:
+        enforce_access_mode(insecure=auth.insecure, has_token=bool(auth.tokens))
+    except (HttpAuthError, AccessModeError) as exc:
         _fail_cli(exc)
     app = mcp.sse_app() if transport == "sse" else mcp.streamable_http_app()
     app = wrap_http_app(app, auth)

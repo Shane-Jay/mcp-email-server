@@ -193,17 +193,18 @@ mcp-email-server streamable-http
 
 Explicit `--host` and `--port` options override those defaults.
 
-| Variable                              | Default             | Description                                             |
-| ------------------------------------- | ------------------- | ------------------------------------------------------- |
-| `MCP_HOST`                            | `localhost`         | Bind host for Streamable HTTP.                          |
-| `MCP_PORT`                            | `9557`              | Bind port for Streamable HTTP.                          |
-| `MCP_ALLOWED_HOSTS`                   | Derived safe values | Comma-separated allowed HTTP `Host` values.             |
-| `MCP_ALLOWED_ORIGINS`                 | Derived safe values | Comma-separated allowed HTTP `Origin` values.           |
-| `MCP_ENABLE_DNS_REBINDING_PROTECTION` | `true`              | Enable `Host` and `Origin` validation.                  |
-| `MCP_EMAIL_HTTP_BEARER_TOKEN`         | unset               | Required Bearer token for SSE and Streamable HTTP.      |
-| `MCP_EMAIL_HTTP_BEARER_TOKENS`        | unset               | Comma-separated extra tokens for rotation.              |
-| `MCP_EMAIL_HTTP_BEARER_TOKEN_FILE`    | unset               | Read the token from a secret file (mode 0600).          |
-| `MCP_EMAIL_HTTP_INSECURE`             | `false`             | Allow HTTP without a token (isolated development only). |
+| Variable                              | Default             | Description                                                                                                                                                                                                          |
+| ------------------------------------- | ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `MCP_HOST`                            | `localhost`         | Bind host for Streamable HTTP.                                                                                                                                                                                       |
+| `MCP_PORT`                            | `9557`              | Bind port for Streamable HTTP.                                                                                                                                                                                       |
+| `MCP_ACCESS_MODE`                     | unset               | `local` or `lan`. Unset keeps the default HTTP policy. When set, insecure mode is refused and a bearer token is required. `lan` also requires an explicit `MCP_ALLOWED_HOSTS` list with DNS-rebinding protection on. |
+| `MCP_ALLOWED_HOSTS`                   | Derived safe values | Comma-separated allowed HTTP `Host` values.                                                                                                                                                                          |
+| `MCP_ALLOWED_ORIGINS`                 | Derived safe values | Comma-separated allowed HTTP `Origin` values.                                                                                                                                                                        |
+| `MCP_ENABLE_DNS_REBINDING_PROTECTION` | `true`              | Enable `Host` and `Origin` validation.                                                                                                                                                                               |
+| `MCP_EMAIL_HTTP_BEARER_TOKEN`         | unset               | Required Bearer token for SSE and Streamable HTTP.                                                                                                                                                                   |
+| `MCP_EMAIL_HTTP_BEARER_TOKENS`        | unset               | Comma-separated extra tokens for rotation.                                                                                                                                                                           |
+| `MCP_EMAIL_HTTP_BEARER_TOKEN_FILE`    | unset               | Read the token from a secret file (mode 0600).                                                                                                                                                                       |
+| `MCP_EMAIL_HTTP_INSECURE`             | `false`             | Allow HTTP without a token (isolated development only). Refused when `MCP_ACCESS_MODE` is `local` or `lan`.                                                                                                          |
 
 ## Bearer-token authentication
 
@@ -231,13 +232,14 @@ When binding to a named non-loopback host, that host is included in the derived
 allowlist. When binding to a wildcard address such as `0.0.0.0` or `::`, the
 server cannot infer the public hostname. Configure the expected service names
 explicitly. Loopback Hosts (`127.0.0.1`, `localhost`, `[::1]`) stay allowed so
-the container healthcheck can call `/healthz` even when the allowlist is a
-Tailscale MagicDNS name, a tailnet IP, or a LAN IP (with or without a port):
+the container healthcheck can call `/healthz` even when the allowlist is a LAN
+IP or hostname (with or without a port):
 
 ```bash
 MCP_HOST=0.0.0.0 \
-MCP_ALLOWED_HOSTS='nas.tail-xxxx.ts.net,100.64.1.10,192.168.1.50:9557' \
-MCP_ALLOWED_ORIGINS='https://nas.tail-xxxx.ts.net' \
+MCP_ACCESS_MODE=lan \
+MCP_ALLOWED_HOSTS='192.168.1.50:9557,nas.local:9557' \
+MCP_ALLOWED_ORIGINS='https://nas.local' \
 mcp-email-server streamable-http
 ```
 

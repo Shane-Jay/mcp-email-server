@@ -2,13 +2,14 @@
 # Copy to docker-compose.yml, copy env.example to .env, chmod 600 .env,
 # then: docker compose up -d
 #
-# Do not publish the local management UI. This service only exposes the MCP
-# Streamable HTTP port on the private network (Tailscale/WireGuard).
+# Do not publish the local management UI. This service exposes Streamable HTTP
+# on the private LAN (plain HTTP). Prefer WireGuard or a reverse proxy with
+# HTTPS. For Synology, see deploy/synology/ (MCP_ACCESS_MODE=local|lan).
 #
 # Host DNS-rebinding: set MCP_ALLOWED_HOSTS in .env to the names/IPs clients
-# will send in the Host header (MagicDNS, tailnet CGNAT IP, LAN IP:port).
-# Binding 0.0.0.0 with that explicit list is supported; loopback is always
-# kept so the healthcheck below can use http://127.0.0.1:9557/healthz.
+# will send in the Host header (LAN IP:port, hostname). Binding 0.0.0.0 with
+# that explicit list is supported; loopback is always kept so the healthcheck
+# below can use http://127.0.0.1:9557/healthz.
 
 services:
   mcp-email:

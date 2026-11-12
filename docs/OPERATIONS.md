@@ -13,12 +13,14 @@ Do not put real credentials, tokens, or personal paths in git. Copy
 
 ## 1. Deploy on Synology Docker / Container Manager
 
-A reviewed NAS kit with Docker secrets, a Tailscale IP bind, and
+A reviewed NAS kit with Docker secrets, `MCP_ACCESS_MODE=local|lan`, and
 `scripts/smoke.sh` lives in `deploy/synology/` (see that directory's README).
-The steps below remain valid for a from-source compose using
-`docker-compose.example.yml`.
+Default is `lan` (bind `0.0.0.0`) so the home LAN and WireGuard-routed
+subnets can reach port 9557. The steps below remain valid for a from-source
+compose using `docker-compose.example.yml`.
 
 群晖密钥版 compose 套件在仓库的 `deploy/synology/`（该目录 README 有逐步说明）。
+默认 `lan` 绑定 `0.0.0.0`，家里局域网和经 WireGuard 路由的网段都能访问。
 下面步骤仍适用于用根目录 `docker-compose.example.yml` 从源码构建。
 
 1. Copy this repository onto the NAS (or clone it into a shared folder).
@@ -31,8 +33,9 @@ The steps below remain valid for a from-source compose using
 6. Confirm the container is user `1000:1000`, `read_only: true`, and healthy
    (`/healthz`). Named volumes for `/data` must be writable by uid 1000
    (`chown -R 1000:1000` on the volume, or Synology shared-folder permissions).
-7. Point the MCP client at `http://<MagicDNS-or-LAN>:9557/mcp` with
-   `Authorization: Bearer <token>` over Tailscale or WireGuard only.
+7. Point the MCP client at `http://<NAS-LAN-IP-or-hostname>:9557/mcp` with
+   `Authorization: Bearer <token>`. LAN traffic is plain HTTP; prefer
+   WireGuard or Synology Reverse Proxy (HTTPS).
 
 Do not publish port 9557 on the public internet. Do not run `mcp-email-server ui`
 in this container.
@@ -44,28 +47,29 @@ in this container.
 5. 打开套件中心 **Container Manager** → **项目**，用该目录创建；或 SSH 执行
    `docker compose up -d --build`。
 6. 确认容器以 `1000:1000` 运行、根文件系统只读、`/healthz` 健康。`/data` 数据卷必须对 uid 1000 可写。
-7. 只在 Tailscale / WireGuard 内网把 MCP 客户端指到
-   `http://<MagicDNS 或局域网>:9557/mcp`，请求头 `Authorization: Bearer <令牌>`。
+7. 把 MCP 客户端指到 `http://<NAS 局域网 IP 或主机名>:9557/mcp`，请求头
+   `Authorization: Bearer <令牌>`。局域网是明文 HTTP，优先走 WireGuard 或群晖反代 HTTPS。
 
 不要把 9557 端口映射到公网。不要在此容器里启动管理 UI。
 
 ### Host headers (`MCP_ALLOWED_HOSTS`)
 
-The compose file binds `0.0.0.0:9557`. DNS-rebinding protection still requires
-an explicit Host allowlist. Include every name/IP the client will send,
-comma-separated, with or without a port:
+Default `lan` mode publishes `0.0.0.0:9557` on the host. DNS-rebinding
+protection still requires an explicit Host allowlist. Include every name/IP
+the MCP client will send (NAS LAN IP:port and hostname):
 
 ```bash
-MCP_ALLOWED_HOSTS=nas.tail-xxxx.ts.net,100.64.1.10,192.168.1.50:9557
+MCP_ALLOWED_HOSTS=192.168.1.50:9557,nas.local:9557
 ```
 
 Loopback (`127.0.0.1`, `localhost`, `[::1]`) is always unioned in so the
 container healthcheck can call `http://127.0.0.1:9557/healthz`. A Host of `*`
 disables the protection — do not use that on a NAS.
 
-compose 绑定 `0.0.0.0:9557`。DNS 重绑定防护仍需要明确的 Host 白名单。把客户端会发送的
-MagicDNS 名、tailnet IP、局域网 IP:端口全部写进逗号分隔列表。回环地址会自动并入，
-这样健康检查仍可用 `127.0.0.1`。不要在 NAS 上把 Host 设为 `*`。
+compose 默认 `lan` 在宿主机上发布 `0.0.0.0:9557`。DNS 重绑定防护仍需要明确的 Host
+白名单。把客户端会发送的局域网 IP:端口和主机名写进逗号分隔列表。回环地址会自动并入，
+这样健康检查仍可用 `127.0.0.1`。不要在 NAS 上把 Host 设为 `*`。 `local` 模式把
+`MCP_BIND_IP` 设为 `127.0.0.1`。
 
 ## 2. Generating tokens and the cache key
 
@@ -197,9 +201,9 @@ rows in process; it works while the cache is encrypted.
 
 | Symptom                                | Check                                                                                                                           |
 | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| Container exits immediately            | HTTP started without a token. Set `MCP_EMAIL_HTTP_BEARER_TOKEN`.                                                                |
+| Container exits immediately            | HTTP started without a token, or `MCP_ACCESS_MODE=lan` with insecure/missing `MCP_ALLOWED_HOSTS`.                               |
 | `/healthz` OK, MCP client 401          | Missing or wrong `Authorization: Bearer`. Rotate with `MCP_EMAIL_HTTP_BEARER_TOKENS`.                                           |
-| MCP client 421/invalid Host            | Add the MagicDNS name / tailnet IP / LAN `host:port` to `MCP_ALLOWED_HOSTS`.                                                    |
+| MCP client 421/invalid Host            | Add the NAS LAN IP:port and hostname to `MCP_ALLOWED_HOSTS`.                                                                    |
 | 163 LOGIN OK then idle failures        | Keep `PRESET=163` (`imap_id_mode=always`).                                                                                      |
 | 163 SEARCH returns nothing             | Expected; local search + encrypted cache. Confirm `MCP_EMAIL_CACHE_KEY` if you want the cache.                                  |
 | `tool_unavailable`                     | Tool is denied (`MCP_EMAIL_SERVER_TOOL_DENY` / allowlist) or `email_command` without `allow_protocol_commands`.                 |
@@ -211,9 +215,9 @@ rows in process; it works while the cache is encrypted.
 
 | 现象                            | 排查                                                                                                               |
 | ------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| 容器立刻退出                    | HTTP 未配置令牌。设置 `MCP_EMAIL_HTTP_BEARER_TOKEN`。                                                              |
+| 容器立刻退出                    | HTTP 未配置令牌，或 `MCP_ACCESS_MODE=lan` 开了 insecure / 没写 `MCP_ALLOWED_HOSTS`。                               |
 | `/healthz` 正常，MCP 客户端 401 | Bearer 缺失或错误。用 `MCP_EMAIL_HTTP_BEARER_TOKENS` 轮换。                                                        |
-| 客户端报 Host 无效              | 把 MagicDNS / tailnet IP / 局域网 `host:port` 加入 `MCP_ALLOWED_HOSTS`。                                           |
+| 客户端报 Host 无效              | 把 NAS 局域网 IP:端口和主机名加入 `MCP_ALLOWED_HOSTS`。                                                            |
 | 163 能 LOGIN 随后失败           | 保持 `PRESET=163`（始终发 IMAP ID）。                                                                              |
 | 163 SEARCH 为空                 | 预期行为；用本地搜索 + 加密缓存。                                                                                  |
 | `tool_unavailable`              | 工具被 allow/deny 排除，或未给账号打开 `email_command`。                                                           |
