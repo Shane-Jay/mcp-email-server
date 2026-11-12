@@ -79,33 +79,53 @@ Container Manager users should change `.env` instead of extra compose files.
 ## 1. Create folders / 建目录
 
 SSH into the NAS. Container Manager GUI can create the project later; secret
-files and `chown` are easier from SSH.
+files and permissions are easier from SSH.
 
 用 SSH 登录群晖。后面可以用 Container Manager 导入项目，密钥文件和权限建议在 SSH 里做。
 
 ```bash
 sudo mkdir -p /volume1/docker/mcp-email-server/{data,cache,attachments}
-sudo mkdir -p /volume1/docker/mcp-email-server/app
+sudo mkdir -p /volume1/docker/mcp-email-server/app/secrets
 # Copy this deploy/synology directory into app/ (compose + env.example + secrets/).
-sudo chown -R 1000:1000 /volume1/docker/mcp-email-server
-sudo chmod 700 /volume1/docker/mcp-email-server/app/secrets
+
+# Data dirs must be writable by the container user (uid 1000).
+sudo chown 1000:1000 /volume1/docker/mcp-email-server/data \
+  /volume1/docker/mcp-email-server/cache \
+  /volume1/docker/mcp-email-server/attachments
+
+# Secret files are written by your DSM user and read by the container through
+# group `users` (gid 100). Do not chown the project tree or the secrets
+# directory to 1000:1000, and do not chmod 700 the secrets directory.
+# Compose sets user: "1000:1000" and group_add: ["100"].
+sudo chown "$(id -u):100" /volume1/docker/mcp-email-server/app/secrets
+sudo chmod 750 /volume1/docker/mcp-email-server/app/secrets
 ```
 
-The container runs as `1000:1000`. Named or bind-mounted folders under
-`/volume1/docker/mcp-email-server` must be writable by that uid. On DSM:
-Control Panel → Shared Folder → Edit → Permissions, or the `chown` above.
+Data, cache, and attachment bind mounts must be writable by uid 1000 (the
+commands above, or DSM: Control Panel → Shared Folder → Edit → Permissions).
 
-容器以 `1000:1000` 运行。`/volume1/docker/mcp-email-server` 下的数据目录必须对
-uid 1000 可写。
+Secret files stay owned by your DSM user, group `users` (gid 100), mode `640`;
+the secrets directory is mode `750`. On typical DSM systems the admin uid is
+not 1000 (often 1026 or similar); use `id -u` and group `users` rather than
+hard-coding a uid. The container can read those files because compose adds
+`group_add: ["100"]`.
+
+数据、缓存和附件目录必须对容器 uid 1000 可写。密钥文件归你的 DSM 用户所有，组为
+`users`（gid 100），文件权限 `640`，目录 `750`。不要把整个项目或 secrets 目录
+`chown` 成 `1000:1000`，也不要把 secrets 目录设为 `700`。compose 已加入
+`group_add: ["100"]`，容器才能以组成员身份读取这些文件。
 
 ## 2. Generate token and cache key / 生成令牌和缓存密钥
 
 ```bash
 cd /volume1/docker/mcp-email-server/app
 mkdir -p secrets
-umask 077
+umask 027
 openssl rand -hex 32 > secrets/http_bearer_token
 openssl rand -hex 32 > secrets/cache_key
+chown "$(id -u):100" secrets/http_bearer_token secrets/cache_key
+chmod 640 secrets/http_bearer_token secrets/cache_key
+chmod 750 secrets
 ```
 
 ## 3. Provider authorization codes / 写入邮箱授权码
@@ -119,8 +139,20 @@ in its secret file:
 printf '%s\n' '163-authorization-code' > secrets/netease_auth_code
 printf '%s\n' 'aliyun-client-password' > secrets/aliyun_auth_code
 printf '%s\n' 'icloud-app-specific-password' > secrets/icloud_app_password
-chmod 600 secrets/*
+chown "$(id -u):100" secrets/*
+chmod 640 secrets/*
+chmod 750 secrets
 ```
+
+If a secret file is unreadable inside the container (wrong owner, group, or
+mode), that account is skipped with `incomplete configuration`. Check the
+container logs if an account is missing after startup. The HTTP bearer token
+and cache key use the same ownership and mode; those failures show up as
+auth or cache errors rather than a skipped account.
+
+如果容器读不到某个密钥文件（属主、组或权限不对），对应账户会被跳过，日志里
+出现 `incomplete configuration`。启动后若缺账户，先查容器日志。Bearer 令牌
+和缓存密钥用同样的属主和权限；这两项读失败会表现为鉴权或缓存错误，而不是跳过账户。
 
 | File                          | Account | Preset   | Where to get it                              |
 | ----------------------------- | ------- | -------- | -------------------------------------------- |
@@ -226,7 +258,7 @@ container, empty `/volume1/docker/mcp-email-server/cache`, then start again.
 
 - Access mode pair: `MCP_ACCESS_MODE` + `MCP_BIND_IP` (default lan / `0.0.0.0`)
 - Bearer token required; `MCP_EMAIL_HTTP_INSECURE=false`
-- `user: "1000:1000"`, `read_only: true`, `tmpfs` on `/tmp`
+- `user: "1000:1000"`, `group_add: ["100"]`, `read_only: true`, `tmpfs` on `/tmp`
 - `cap_drop: ALL`, `security_opt: no-new-privileges:true`
 - Healthcheck against `/healthz`
 - IMAP pool on, `SEND_DRAFT=safe`, conservative `TOOL_ALLOW`, recipient allowlist

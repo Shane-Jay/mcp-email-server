@@ -32,7 +32,11 @@ compose using `docker-compose.example.yml`.
    `docker-compose.yml`, or from SSH: `docker compose up -d --build`.
 6. Confirm the container is user `1000:1000`, `read_only: true`, and healthy
    (`/healthz`). Named volumes for `/data` must be writable by uid 1000
-   (`chown -R 1000:1000` on the volume, or Synology shared-folder permissions).
+   (`chown 1000:1000` on the data volume, or Synology shared-folder
+   permissions). For the Synology kit in `deploy/synology/`, secret files are
+   owned by your DSM user, group `users` (gid 100), mode `640`, with
+   `group_add: ["100"]` on the container — do not chown secrets to `1000:1000`.
+   An unreadable password file skips that account with `incomplete configuration`.
 7. Point the MCP client at `http://<NAS-LAN-IP-or-hostname>:9557/mcp` with
    `Authorization: Bearer <token>`. LAN traffic is plain HTTP; prefer
    WireGuard or Synology Reverse Proxy (HTTPS).
@@ -47,6 +51,9 @@ in this container.
 5. 打开套件中心 **Container Manager** → **项目**，用该目录创建；或 SSH 执行
    `docker compose up -d --build`。
 6. 确认容器以 `1000:1000` 运行、根文件系统只读、`/healthz` 健康。`/data` 数据卷必须对 uid 1000 可写。
+   `deploy/synology/` 套件里的密钥文件归 DSM 用户所有，组为 `users`（gid 100），权限 `640`，
+   容器带 `group_add: ["100"]`；不要把密钥 chown 成 `1000:1000`。读不到的密码文件会让该账户
+   被跳过，日志为 `incomplete configuration`。
 7. 把 MCP 客户端指到 `http://<NAS 局域网 IP 或主机名>:9557/mcp`，请求头
    `Authorization: Bearer <令牌>`。局域网是明文 HTTP，优先走 WireGuard 或群晖反代 HTTPS。
 

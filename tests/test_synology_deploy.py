@@ -50,6 +50,7 @@ def test_synology_compose_is_hardened_and_defaults_to_lan_bind() -> None:
     assert service["image"] == "ghcr.io/shane-jay/mcp-email-server:latest"
     assert "sha256" in COMPOSE.read_text(encoding="utf-8")
     assert service["user"] == "1000:1000"
+    assert service.get("group_add") == ["100"]
     assert service["read_only"] is True
     assert service["cap_drop"] == ["ALL"]
     assert "no-new-privileges:true" in service["security_opt"]
@@ -166,7 +167,9 @@ def test_synology_readme_covers_required_steps_in_english_and_chinese() -> None:
     text = README.read_text(encoding="utf-8")
     for needle in (
         "openssl rand -hex 32",
-        "chown -R 1000:1000",
+        "chmod 640",
+        "group_add",
+        "incomplete configuration",
         "/volume1/docker/mcp-email-server",
         "docker compose up -d",
         "/healthz",
@@ -189,6 +192,9 @@ def test_synology_readme_covers_required_steps_in_english_and_chinese() -> None:
         "sha256",
     ):
         assert needle in text
+    assert "chown -R 1000:1000 /volume1/docker/mcp-email-server\n" not in text
+    assert "chmod 700 /volume1/docker/mcp-email-server/app/secrets" not in text
+    assert "chmod 600 secrets/*" not in text
 
 
 def test_smoke_script_is_executable_and_requires_args() -> None:

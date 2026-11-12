@@ -1,7 +1,13 @@
 # Secret files (not committed)
 
 Create these files next to this README. One secret per file, no trailing
-spaces, a single trailing newline is fine. Mode `600`.
+spaces, a single trailing newline is fine.
+
+Ownership and mode: owner = your DSM user, group = `users` (gid 100),
+file mode `640`, directory mode `750`. The container runs as `1000:1000`
+with `group_add: ["100"]` so it can read them. Do not chown these files
+to `1000:1000` or set mode `600` — an unreadable password file causes that
+account to be skipped with `incomplete configuration`.
 
 | File                  | Contents                                     |
 | --------------------- | -------------------------------------------- |
