@@ -10,8 +10,12 @@ from mcp_email_server.app import reply_email, save_draft, send_draft
 from mcp_email_server.application.accounts import AvailableAccount
 from mcp_email_server.application.mutations import (
     DeleteCommand,
+    DraftSource,
+    FetchDraftCommand,
+    InlineAttachment,
     MoveCommand,
     RecipientPolicyDeniedError,
+    SendCommand,
     SendMutationOutcome,
     SentCopyMutationOutcome,
     TargetMutationOutcome,
@@ -139,6 +143,22 @@ async def test_reply_email_tool_sets_thread_headers_and_reuses_send():
     assert "bob@example.test" in (kwargs["cc"] or [])
 
 
+def _draft_source(*, recipients: list[str] | None = None, **changes: object) -> DraftSource:
+    source = DraftSource(
+        to=tuple(recipients or ["ada@example.test"]),
+        cc=(),
+        bcc=(),
+        subject="Draft subject",
+        body="Original body",
+        html=False,
+        html_body=None,
+        attachments=(),
+        in_reply_to=None,
+        references=None,
+    )
+    return source if not changes else DraftSource(**{**source.__dict__, **changes})
+
+
 def _clean_send(*, sent_copy: str = "succeeded") -> SendMutationOutcome:
     return SendMutationOutcome(
         (TargetMutationOutcome("ada@example.test", "succeeded"),),
@@ -148,19 +168,17 @@ def _clean_send(*, sent_copy: str = "succeeded") -> SendMutationOutcome:
 
 @pytest.mark.asyncio
 async def test_send_draft_tool_deletes_draft_when_sent_copy_was_saved():
-    draft = _body()
-    draft.subject = "Draft subject"
-    draft.recipients = ["ada@example.test"]
-    batch = EmailContentBatchResponse(emails=[draft], requested_count=1, retrieved_count=1, failed_ids=[])
     delete = AsyncMock()
     with (
-        patch("mcp_email_server.app.get_email_content_query", AsyncMock(return_value=batch)),
+        patch("mcp_email_server.app.fetch_draft_source", AsyncMock(return_value=_draft_source())) as fetch,
         patch("mcp_email_server.app.send_email_command", AsyncMock(return_value=_clean_send())) as send,
         patch("mcp_email_server.app.delete_emails_command", delete),
         patch("mcp_email_server.app.move_emails_command", AsyncMock()),
     ):
         result = await send_draft(account_name="personal", email_id="42", mailbox="Drafts")
     assert result.startswith("Email sent successfully")
+    fetch.assert_awaited_once()
+    assert isinstance(fetch.await_args.args[0], FetchDraftCommand)
     send.assert_awaited_once()
     delete.assert_awaited_once()
     command = delete.await_args.args[0]
@@ -172,13 +190,10 @@ async def test_send_draft_tool_deletes_draft_when_sent_copy_was_saved():
 @pytest.mark.asyncio
 async def test_send_draft_safe_mode_keeps_draft_without_sent_copy(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.delenv("MCP_EMAIL_SERVER_SEND_DRAFT", raising=False)
-    draft = _body()
-    draft.recipients = ["ada@example.test"]
-    batch = EmailContentBatchResponse(emails=[draft], requested_count=1, retrieved_count=1, failed_ids=[])
     delete = AsyncMock()
     move = AsyncMock()
     with (
-        patch("mcp_email_server.app.get_email_content_query", AsyncMock(return_value=batch)),
+        patch("mcp_email_server.app.fetch_draft_source", AsyncMock(return_value=_draft_source())),
         patch("mcp_email_server.app.send_email_command", AsyncMock(return_value=_clean_send(sent_copy="skipped"))),
         patch("mcp_email_server.app.delete_emails_command", delete),
         patch("mcp_email_server.app.move_emails_command", move),
@@ -192,12 +207,9 @@ async def test_send_draft_safe_mode_keeps_draft_without_sent_copy(monkeypatch: p
 @pytest.mark.asyncio
 async def test_send_draft_delete_mode_always_deletes(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("MCP_EMAIL_SERVER_SEND_DRAFT", "delete")
-    draft = _body()
-    draft.recipients = ["ada@example.test"]
-    batch = EmailContentBatchResponse(emails=[draft], requested_count=1, retrieved_count=1, failed_ids=[])
     delete = AsyncMock()
     with (
-        patch("mcp_email_server.app.get_email_content_query", AsyncMock(return_value=batch)),
+        patch("mcp_email_server.app.fetch_draft_source", AsyncMock(return_value=_draft_source())),
         patch("mcp_email_server.app.send_email_command", AsyncMock(return_value=_clean_send(sent_copy="skipped"))),
         patch("mcp_email_server.app.delete_emails_command", delete),
         patch("mcp_email_server.app.move_emails_command", AsyncMock()),
@@ -209,13 +221,10 @@ async def test_send_draft_delete_mode_always_deletes(monkeypatch: pytest.MonkeyP
 @pytest.mark.asyncio
 async def test_send_draft_move_mode_moves_when_no_sent_copy(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("MCP_EMAIL_SERVER_SEND_DRAFT", "move")
-    draft = _body()
-    draft.recipients = ["ada@example.test"]
-    batch = EmailContentBatchResponse(emails=[draft], requested_count=1, retrieved_count=1, failed_ids=[])
     delete = AsyncMock()
     move = AsyncMock()
     with (
-        patch("mcp_email_server.app.get_email_content_query", AsyncMock(return_value=batch)),
+        patch("mcp_email_server.app.fetch_draft_source", AsyncMock(return_value=_draft_source())),
         patch("mcp_email_server.app.send_email_command", AsyncMock(return_value=_clean_send(sent_copy="skipped"))),
         patch("mcp_email_server.app.delete_emails_command", delete),
         patch("mcp_email_server.app.move_emails_command", move),
@@ -233,13 +242,10 @@ async def test_send_draft_move_mode_moves_when_no_sent_copy(monkeypatch: pytest.
 @pytest.mark.asyncio
 async def test_send_draft_keep_mode_leaves_draft(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("MCP_EMAIL_SERVER_SEND_DRAFT", "keep")
-    draft = _body()
-    draft.recipients = ["ada@example.test"]
-    batch = EmailContentBatchResponse(emails=[draft], requested_count=1, retrieved_count=1, failed_ids=[])
     delete = AsyncMock()
     move = AsyncMock()
     with (
-        patch("mcp_email_server.app.get_email_content_query", AsyncMock(return_value=batch)),
+        patch("mcp_email_server.app.fetch_draft_source", AsyncMock(return_value=_draft_source())),
         patch("mcp_email_server.app.send_email_command", AsyncMock(return_value=_clean_send())),
         patch("mcp_email_server.app.delete_emails_command", delete),
         patch("mcp_email_server.app.move_emails_command", move),
@@ -274,12 +280,12 @@ async def test_reply_email_enforces_recipient_allowlist():
 
 @pytest.mark.asyncio
 async def test_send_draft_enforces_recipient_allowlist_and_keeps_the_draft():
-    draft = _body()
-    draft.recipients = ["blocked@evil.test"]
-    batch = EmailContentBatchResponse(emails=[draft], requested_count=1, retrieved_count=1, failed_ids=[])
     delete = AsyncMock()
     with (
-        patch("mcp_email_server.app.get_email_content_query", AsyncMock(return_value=batch)),
+        patch(
+            "mcp_email_server.app.fetch_draft_source",
+            AsyncMock(return_value=_draft_source(recipients=["blocked@evil.test"])),
+        ),
         patch(
             "mcp_email_server.app.send_email_command",
             AsyncMock(side_effect=RecipientPolicyDeniedError("recipient policy denied one or more addresses")),
@@ -289,6 +295,42 @@ async def test_send_draft_enforces_recipient_allowlist_and_keeps_the_draft():
         with pytest.raises(ValueError, match="not in allowlist"):
             await send_draft(account_name="personal", email_id="42", mailbox="Drafts")
     delete.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_send_draft_preserves_to_cc_bcc_html_and_attachments():
+    pdf = b"%PDF-1.4 test"
+    source = _draft_source(
+        to=("ada@example.test",),
+        cc=("cara@example.test",),
+        bcc=("secret@example.test",),
+        subject="HTML draft",
+        body="plain fallback",
+        html=True,
+        html_body="<p>Hello</p>",
+        attachments=(InlineAttachment("note.pdf", "application/pdf", pdf),),
+        in_reply_to="<mid-1@example.test>",
+        references="<mid-0@example.test> <mid-1@example.test>",
+    )
+    with (
+        patch("mcp_email_server.app.fetch_draft_source", AsyncMock(return_value=source)),
+        patch("mcp_email_server.app.send_email_command", AsyncMock(return_value=_clean_send())) as send,
+        patch("mcp_email_server.app.delete_emails_command", AsyncMock()),
+        patch("mcp_email_server.app.move_emails_command", AsyncMock()),
+    ):
+        result = await send_draft(account_name="personal", email_id="42", mailbox="Drafts")
+    assert "ada@example.test" in result
+    command = send.await_args.args[0]
+    assert isinstance(command, SendCommand)
+    assert command.recipients == ("ada@example.test",)
+    assert command.cc == ("cara@example.test",)
+    assert command.bcc == ("secret@example.test",)
+    assert command.html is True
+    assert command.body == "plain fallback"
+    assert command.html_body == "<p>Hello</p>"
+    assert command.attachments == ()
+    assert command.inline_attachments == (InlineAttachment("note.pdf", "application/pdf", pdf),)
+    assert command.in_reply_to == "<mid-1@example.test>"
 
 
 @pytest.mark.asyncio

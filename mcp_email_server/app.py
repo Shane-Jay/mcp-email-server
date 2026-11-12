@@ -23,8 +23,11 @@ from mcp_email_server.application.mutations import (
     CreateMailboxCommand,
     CreateMailboxOutcome,
     DeleteCommand,
+    DraftSource,
+    FetchDraftCommand,
     FlagOperation,
     ForwardCommand,
+    InlineAttachment,
     MarkReadCommand,
     MoveCommand,
     MoveMutationOutcome,
@@ -99,6 +102,10 @@ async def list_email_metadata(query: ListEmailMetadataQuery) -> EmailMetadataPag
 
 async def send_email_command(command: SendCommand) -> SendMutationOutcome:
     return await get_application_runtime().mutations.send.execute(command)
+
+
+async def fetch_draft_source(command: FetchDraftCommand) -> DraftSource:
+    return await get_application_runtime().mutations.send.fetch_draft(command)
 
 
 async def forward_email_command(command: ForwardCommand) -> SendMutationOutcome:
@@ -1212,28 +1219,36 @@ async def send_draft(
         ),
     ] = "Drafts",
 ) -> str:
-    original = await get_email_content_query(
-        GetEmailContentQuery(account_name=account_name, email_ids=(email_id,), mailbox=mailbox)
-    )
-    if not original.emails:
-        raise ValueError("Draft was not found or could not be read")
-    source = original.emails[0]
-    if not source.recipients:
+    try:
+        source = await fetch_draft_source(
+            FetchDraftCommand(account_name=account_name, email_id=email_id, mailbox=mailbox)
+        )
+    except ValueError as exc:
+        detail = str(exc).casefold()
+        if any(token in detail for token in ("failed to fetch", "could not find", "could not parse")):
+            raise ValueError("Draft was not found or could not be read") from exc
+        raise
+    recipients = source.to
+    if not recipients and not source.cc and not source.bcc:
         raise ValueError("Draft has no recipients; edit it before sending")
     try:
         outcome = await send_email_command(
             SendCommand(
                 account_name=account_name,
-                recipients=tuple(source.recipients),
+                recipients=recipients,
                 subject=source.subject,
-                body=source.body.replace("...[TRUNCATED]", ""),
-                cc=(),
-                bcc=(),
-                html=False,
+                body=source.body,
+                cc=source.cc,
+                bcc=source.bcc,
+                html=source.html,
                 attachments=(),
                 in_reply_to=source.in_reply_to,
                 references=source.references,
                 reply_to=None,
+                html_body=source.html_body,
+                inline_attachments=tuple(
+                    InlineAttachment(item.filename, item.content_type, item.payload) for item in source.attachments
+                ),
             )
         )
     except RecipientPolicyDeniedError as exc:
@@ -1243,7 +1258,8 @@ async def send_draft(
         ) from exc
     if _send_outcome_is_clean(outcome):
         await _dispose_sent_draft(account_name, email_id, mailbox, outcome.sent_copy)
-        return f"Email sent successfully to {', '.join(source.recipients)}{_reported_message_id(outcome)}"
+        delivered = [*recipients, *source.cc, *source.bcc]
+        return f"Email sent successfully to {', '.join(delivered)}{_reported_message_id(outcome)}"
     return f"Email delivery [{_tagged_send_result(outcome)}]"
 
 

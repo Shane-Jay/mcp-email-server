@@ -54,6 +54,10 @@ IMAP authorization code, not the web login.
 - Do not publish port 9557 or the management UI on the public internet.
 - Empty `MCP_EMAIL_SERVER_ALLOWED_RECIPIENTS` denies sending, including reply,
   forward, `save_draft`, and `send_draft`.
+- `get_attachment_content` needs **both** `MCP_EMAIL_SERVER_ENABLE_ATTACHMENT_CONTENT=true`
+  (or `enable_attachment_content = true` in TOML) **and** the tool allowed in
+  the catalog. If you set `MCP_EMAIL_SERVER_TOOL_ALLOW`, include
+  `get_attachment_content` there.
 - After `send_draft`, the default `MCP_EMAIL_SERVER_SEND_DRAFT=safe` deletes the
   draft only when this server saved a Sent copy; otherwise the draft is kept.
 - Logs redact configured passwords, bearer tokens, and the cache key, and strip
@@ -75,7 +79,10 @@ make test-e2e      # GreenMail (Docker compose, or Java standalone)
 收件人白名单和 163/阿里云/iCloud 授权码。详见
 [docs/OPERATIONS.md](docs/OPERATIONS.md) 和 `deploy/synology/`。默认 `lan` 绑定
 `0.0.0.0`，局域网是明文 HTTP，优先走 WireGuard 或群晖反代 HTTPS。不要把 9557
-或管理 UI 暴露到公网。空收件人白名单默认禁止发信。
+或管理 UI 暴露到公网。空收件人白名单默认禁止发信。`get_attachment_content`
+同时需要 `MCP_EMAIL_SERVER_ENABLE_ATTACHMENT_CONTENT=true`（或 TOML 里
+`enable_attachment_content = true`）以及工具目录放行：若设置了
+`MCP_EMAIL_SERVER_TOOL_ALLOW`，必须把 `get_attachment_content` 写进该列表。
 
 ## Documentation
 

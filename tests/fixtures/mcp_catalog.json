@@ -322,7 +322,7 @@
                             }
                         ],
                         "default": null,
-                        "description": "Search for text in the entire message — headers and body (IMAP TEXT).",
+                        "description": "Search for text in the entire message \u2014 headers and body (IMAP TEXT).",
                         "title": "Text"
                     },
                     "has_attachment": {
@@ -370,6 +370,45 @@
             },
             "outputSchema": {
                 "$defs": {
+                    "AttachmentInfo": {
+                        "description": "Attachment metadata from IMAP BODYSTRUCTURE (no body download).",
+                        "properties": {
+                            "filename": {
+                                "maxLength": 4096,
+                                "title": "Filename",
+                                "type": "string"
+                            },
+                            "size": {
+                                "anyOf": [
+                                    {
+                                        "minimum": 0,
+                                        "type": "integer"
+                                    },
+                                    {
+                                        "type": "null"
+                                    }
+                                ],
+                                "default": null,
+                                "title": "Size"
+                            },
+                            "content_type": {
+                                "anyOf": [
+                                    {
+                                        "maxLength": 256,
+                                        "type": "string"
+                                    },
+                                    {
+                                        "type": "null"
+                                    }
+                                ],
+                                "default": null,
+                                "title": "Content Type"
+                            }
+                        },
+                        "required": ["filename"],
+                        "title": "AttachmentInfo",
+                        "type": "object"
+                    },
                     "EmailMetadata": {
                         "description": "Email metadata",
                         "properties": {
@@ -414,6 +453,14 @@
                                     "type": "string"
                                 },
                                 "title": "Attachments",
+                                "type": "array"
+                            },
+                            "attachment_info": {
+                                "items": {
+                                    "$ref": "#/$defs/AttachmentInfo"
+                                },
+                                "maxItems": 20,
+                                "title": "Attachment Info",
                                 "type": "array"
                             },
                             "provider_keywords": {
@@ -589,6 +636,45 @@
             },
             "outputSchema": {
                 "$defs": {
+                    "AttachmentInfo": {
+                        "description": "Attachment metadata from IMAP BODYSTRUCTURE (no body download).",
+                        "properties": {
+                            "filename": {
+                                "maxLength": 4096,
+                                "title": "Filename",
+                                "type": "string"
+                            },
+                            "size": {
+                                "anyOf": [
+                                    {
+                                        "minimum": 0,
+                                        "type": "integer"
+                                    },
+                                    {
+                                        "type": "null"
+                                    }
+                                ],
+                                "default": null,
+                                "title": "Size"
+                            },
+                            "content_type": {
+                                "anyOf": [
+                                    {
+                                        "maxLength": 256,
+                                        "type": "string"
+                                    },
+                                    {
+                                        "type": "null"
+                                    }
+                                ],
+                                "default": null,
+                                "title": "Content Type"
+                            }
+                        },
+                        "required": ["filename"],
+                        "title": "AttachmentInfo",
+                        "type": "object"
+                    },
                     "EmailBodyResponse": {
                         "description": "Single email body response with body content and reply-thread headers.",
                         "properties": {
@@ -633,6 +719,14 @@
                                     "type": "string"
                                 },
                                 "title": "Attachments",
+                                "type": "array"
+                            },
+                            "attachment_info": {
+                                "items": {
+                                    "$ref": "#/$defs/AttachmentInfo"
+                                },
+                                "maxItems": 20,
+                                "title": "Attachment Info",
                                 "type": "array"
                             },
                             "provider_keywords": {
@@ -803,7 +897,7 @@
         },
         {
             "name": "list_allowed_recipients",
-            "description": "List the configured recipient allowlist — the address patterns that send_email and forward_email are permitted to send to and save_to_mailbox is permitted to address. Matching is case-insensitive and supports glob patterns such as *@example.com; * explicitly allows all recipients. An empty list denies all recipients for these operations; configure patterns through the user-operated CLI/UI.",
+            "description": "List the configured recipient allowlist \u2014 the address patterns that send_email and forward_email are permitted to send to and save_to_mailbox is permitted to address. Matching is case-insensitive and supports glob patterns such as *@example.com; * explicitly allows all recipients. An empty list denies all recipients for these operations; configure patterns through the user-operated CLI/UI.",
             "inputSchema": {
                 "properties": {},
                 "title": "list_allowed_recipientsArguments",
@@ -833,7 +927,7 @@
         },
         {
             "name": "list_allowed_senders",
-            "description": "List the configured inbound sender allowlist — the address patterns whose mail the server will read or act on. When configured, only these senders' mail is visible to the read tools (list_emails_metadata, get_emails_content, download_attachment, and forward_email's source read) and eligible for the mutation tools (delete_emails, set_email_flags, mark_emails_as_read, move_emails, archive_emails). Returns an empty list when unrestricted.",
+            "description": "List the configured inbound sender allowlist \u2014 the address patterns whose mail the server will read or act on. When configured, only these senders' mail is visible to the read tools (list_emails_metadata, get_emails_content, download_attachment, and forward_email's source read) and eligible for the mutation tools (delete_emails, set_email_flags, mark_emails_as_read, move_emails, archive_emails). Returns an empty list when unrestricted.",
             "inputSchema": {
                 "properties": {},
                 "title": "list_allowed_sendersArguments",
@@ -1130,7 +1224,7 @@
         },
         {
             "name": "save_to_mailbox",
-            "description": "Compose an email and save it to an IMAP folder (e.g., Drafts). Shares recipient, body, attachment, and threading parameters with send_email; adds mailbox and flags, and does not support reply_to. Default folder is Drafts with \\Draft and \\Seen flags. Pure IMAP operation — works without SMTP configuration. An ambiguous APPEND is reported as unknown and is not retried automatically.",
+            "description": "Compose an email and save it to an IMAP folder (e.g., Drafts). Shares recipient, body, attachment, and threading parameters with send_email; adds mailbox and flags, and does not support reply_to. Default folder is Drafts with \\Draft and \\Seen flags. Pure IMAP operation \u2014 works without SMTP configuration. An ambiguous APPEND is reported as unknown and is not retried automatically.",
             "inputSchema": {
                 "properties": {
                     "account_name": {

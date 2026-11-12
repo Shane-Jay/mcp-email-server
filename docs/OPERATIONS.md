@@ -199,33 +199,35 @@ rows in process; it works while the cache is encrypted.
 
 ## 7. Troubleshooting
 
-| Symptom                                | Check                                                                                                                           |
-| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| Container exits immediately            | HTTP started without a token, or `MCP_ACCESS_MODE=lan` with insecure/missing `MCP_ALLOWED_HOSTS`.                               |
-| `/healthz` OK, MCP client 401          | Missing or wrong `Authorization: Bearer`. Rotate with `MCP_EMAIL_HTTP_BEARER_TOKENS`.                                           |
-| MCP client 421/invalid Host            | Add the NAS LAN IP:port and hostname to `MCP_ALLOWED_HOSTS`.                                                                    |
-| 163 LOGIN OK then idle failures        | Keep `PRESET=163` (`imap_id_mode=always`).                                                                                      |
-| 163 SEARCH returns nothing             | Expected; local search + encrypted cache. Confirm `MCP_EMAIL_CACHE_KEY` if you want the cache.                                  |
-| `tool_unavailable`                     | Tool is denied (`MCP_EMAIL_SERVER_TOOL_DENY` / allowlist) or `email_command` without `allow_protocol_commands`.                 |
-| Send / reply / forward denied          | Empty recipient allowlist denies all. Set `MCP_EMAIL_SERVER_ALLOWED_RECIPIENTS`.                                                |
-| Attachment path rejected               | Outgoing files must sit inside `MCP_EMAIL_SERVER_ATTACHMENT_DIR`. Forwarded IMAP parts are not subject to that directory.       |
-| Draft still in Drafts after send_draft | Default `MCP_EMAIL_SERVER_SEND_DRAFT=safe` keeps the draft unless a Sent copy was saved. Set `delete` or enable `save_to_sent`. |
-| Cache search empty after key change    | Wipe the cache; old ciphertext cannot be read with a new key.                                                                   |
-| Read-only root FS write errors         | Data belongs on `/data` and `/tmp` (tmpfs). Do not write under `/app`.                                                          |
+| Symptom                                 | Check                                                                                                                                                        |
+| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Container exits immediately             | HTTP started without a token, or `MCP_ACCESS_MODE=lan` with insecure/missing `MCP_ALLOWED_HOSTS`.                                                            |
+| `/healthz` OK, MCP client 401           | Missing or wrong `Authorization: Bearer`. Rotate with `MCP_EMAIL_HTTP_BEARER_TOKENS`.                                                                        |
+| MCP client 421/invalid Host             | Add the NAS LAN IP:port and hostname to `MCP_ALLOWED_HOSTS`.                                                                                                 |
+| 163 LOGIN OK then idle failures         | Keep `PRESET=163` (`imap_id_mode=always`).                                                                                                                   |
+| 163 SEARCH returns nothing              | Expected; local search + encrypted cache. Confirm `MCP_EMAIL_CACHE_KEY` if you want the cache.                                                               |
+| `tool_unavailable`                      | Tool is denied (`MCP_EMAIL_SERVER_TOOL_DENY` / allowlist) or `email_command` without `allow_protocol_commands`.                                              |
+| `get_attachment_content` missing/denied | Needs **both** `MCP_EMAIL_SERVER_ENABLE_ATTACHMENT_CONTENT=true` (or TOML `enable_attachment_content`) **and** the tool in `TOOL_ALLOW` if that list is set. |
+| Send / reply / forward denied           | Empty recipient allowlist denies all. Set `MCP_EMAIL_SERVER_ALLOWED_RECIPIENTS`.                                                                             |
+| Attachment path rejected                | Outgoing files must sit inside `MCP_EMAIL_SERVER_ATTACHMENT_DIR`. Forwarded IMAP parts are not subject to that directory.                                    |
+| Draft still in Drafts after send_draft  | Default `MCP_EMAIL_SERVER_SEND_DRAFT=safe` keeps the draft unless a Sent copy was saved. Set `delete` or enable `save_to_sent`.                              |
+| Cache search empty after key change     | Wipe the cache; old ciphertext cannot be read with a new key.                                                                                                |
+| Read-only root FS write errors          | Data belongs on `/data` and `/tmp` (tmpfs). Do not write under `/app`.                                                                                       |
 
-| 现象                            | 排查                                                                                                               |
-| ------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| 容器立刻退出                    | HTTP 未配置令牌，或 `MCP_ACCESS_MODE=lan` 开了 insecure / 没写 `MCP_ALLOWED_HOSTS`。                               |
-| `/healthz` 正常，MCP 客户端 401 | Bearer 缺失或错误。用 `MCP_EMAIL_HTTP_BEARER_TOKENS` 轮换。                                                        |
-| 客户端报 Host 无效              | 把 NAS 局域网 IP:端口和主机名加入 `MCP_ALLOWED_HOSTS`。                                                            |
-| 163 能 LOGIN 随后失败           | 保持 `PRESET=163`（始终发 IMAP ID）。                                                                              |
-| 163 SEARCH 为空                 | 预期行为；用本地搜索 + 加密缓存。                                                                                  |
-| `tool_unavailable`              | 工具被 allow/deny 排除，或未给账号打开 `email_command`。                                                           |
-| send_draft 后草稿还在           | 默认 `MCP_EMAIL_SERVER_SEND_DRAFT=safe`：只有成功写入已发送时才删草稿。需要的话设 `delete` 或打开 `save_to_sent`。 |
-| 发信/回复/转发被拒              | 空收件人白名单默认拒绝。设置 `MCP_EMAIL_SERVER_ALLOWED_RECIPIENTS`。                                               |
-| 附件路径被拒                    | 本地附件必须在 `MCP_EMAIL_SERVER_ATTACHMENT_DIR` 内。转发原信的 IMAP 附件不受该目录限制。                          |
-| 换密钥后缓存搜索为空            | 清空缓存；旧密文不能用新密钥读。                                                                                   |
-| 只读根文件系统写失败            | 数据写 `/data` 和 `/tmp`（tmpfs），不要写 `/app`。                                                                 |
+| 现象                            | 排查                                                                                                                                                |
+| ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 容器立刻退出                    | HTTP 未配置令牌，或 `MCP_ACCESS_MODE=lan` 开了 insecure / 没写 `MCP_ALLOWED_HOSTS`。                                                                |
+| `/healthz` 正常，MCP 客户端 401 | Bearer 缺失或错误。用 `MCP_EMAIL_HTTP_BEARER_TOKENS` 轮换。                                                                                         |
+| 客户端报 Host 无效              | 把 NAS 局域网 IP:端口和主机名加入 `MCP_ALLOWED_HOSTS`。                                                                                             |
+| 163 能 LOGIN 随后失败           | 保持 `PRESET=163`（始终发 IMAP ID）。                                                                                                               |
+| 163 SEARCH 为空                 | 预期行为；用本地搜索 + 加密缓存。                                                                                                                   |
+| `tool_unavailable`              | 工具被 allow/deny 排除，或未给账号打开 `email_command`。                                                                                            |
+| `get_attachment_content` 不可用 | 需要同时打开 `MCP_EMAIL_SERVER_ENABLE_ATTACHMENT_CONTENT=true`（或 TOML `enable_attachment_content`），并在设置了 `TOOL_ALLOW` 时把该工具写进列表。 |
+| send_draft 后草稿还在           | 默认 `MCP_EMAIL_SERVER_SEND_DRAFT=safe`：只有成功写入已发送时才删草稿。需要的话设 `delete` 或打开 `save_to_sent`。                                  |
+| 发信/回复/转发被拒              | 空收件人白名单默认拒绝。设置 `MCP_EMAIL_SERVER_ALLOWED_RECIPIENTS`。                                                                                |
+| 附件路径被拒                    | 本地附件必须在 `MCP_EMAIL_SERVER_ATTACHMENT_DIR` 内。转发原信的 IMAP 附件不受该目录限制。                                                           |
+| 换密钥后缓存搜索为空            | 清空缓存；旧密文不能用新密钥读。                                                                                                                    |
+| 只读根文件系统写失败            | 数据写 `/data` 和 `/tmp`（tmpfs），不要写 `/app`。                                                                                                  |
 
 More protocol-level notes: [troubleshooting.md](troubleshooting.md),
 [security.md](security.md), [transports.md](transports.md).

@@ -328,6 +328,15 @@ def normalize_thread_message_ids(value: str) -> str:
 
 
 @dataclass(frozen=True)
+class InlineAttachment:
+    """In-memory attachment bytes carried from a stored draft into SMTP."""
+
+    filename: str
+    content_type: str
+    payload: bytes
+
+
+@dataclass(frozen=True)
 class ComposeCommand:
     account_name: str
     recipients: tuple[str, ...]
@@ -339,6 +348,8 @@ class ComposeCommand:
     attachments: tuple[str, ...] = ()
     in_reply_to: str | None = None
     references: str | None = None
+    html_body: str | None = None
+    inline_attachments: tuple[InlineAttachment, ...] = ()
 
     def validate(self) -> None:
         self._validate_compose()
@@ -347,6 +358,8 @@ class ComposeCommand:
         _validate_account_name(self.account_name)
         _validate_recipients((*self.recipients, *self.cc, *self.bcc), allow_empty=allow_recipientless)
         _validate_content(self.subject, self.body, self.attachments)
+        _validate_optional_html_body(self.html_body)
+        _validate_inline_attachments(self.inline_attachments, file_count=len(self.attachments))
         _validate_optional_header("in_reply_to", self.in_reply_to)
         _validate_optional_header("references", self.references)
         if self.in_reply_to is not None:
@@ -398,6 +411,34 @@ class SendCommand(ComposeCommand):
 
 
 @dataclass(frozen=True)
+class FetchDraftCommand:
+    account_name: str
+    email_id: str
+    mailbox: str = "Drafts"
+
+    def validate(self) -> None:
+        _validate_account_name(self.account_name)
+        validate_imap_uid(self.email_id, field_name="email_id")
+        validate_mailbox_name(self.mailbox)
+
+
+@dataclass(frozen=True)
+class DraftSource:
+    """Parsed stored draft used to reconstruct SMTP submission."""
+
+    to: tuple[str, ...]
+    cc: tuple[str, ...]
+    bcc: tuple[str, ...]
+    subject: str
+    body: str
+    html: bool
+    html_body: str | None
+    attachments: tuple[InlineAttachment, ...]
+    in_reply_to: str | None
+    references: str | None
+
+
+@dataclass(frozen=True)
 class ForwardSourcePart:
     """One retained body part of a forwarded message.
 
@@ -443,7 +484,9 @@ class ForwardCommand(ComposeCommand):
             raise ValueError("forward subject is derived from the source message and must be empty")
         if self.html:
             raise ValueError("forwarded content is composed as plain text; html is not supported")
-        if self.attachments:
+        if self.html_body:
+            raise ValueError("forwarded content is composed as plain text; html_body is not supported")
+        if self.attachments or self.inline_attachments:
             raise ValueError("forward does not accept caller attachments; the source's parts are re-attached")
 
 
@@ -516,6 +559,12 @@ class MutationProvider(Protocol):
         command: ForwardCommand,
         account: MutationAccountSnapshot,
     ) -> ForwardSource: ...
+
+    async def fetch_draft_source(
+        self,
+        command: FetchDraftCommand,
+        account: MutationAccountSnapshot,
+    ) -> DraftSource: ...
 
     async def forward(
         self,
@@ -609,6 +658,52 @@ def _validate_content(subject: str, body: str, attachments: tuple[str, ...]) -> 
     if len(body.encode("utf-8")) > APPLICATION_LIMITS.body_bytes:
         raise ValueError(f"body exceeds {APPLICATION_LIMITS.body_bytes} bytes")
     _validate_attachment_paths(attachments)
+
+
+def _validate_optional_html_body(html_body: str | None) -> None:
+    if html_body is None:
+        return
+    if not isinstance(html_body, str):
+        raise ValueError("html_body must be a string")  # noqa: TRY004 - stable validation contract
+    if len(html_body.encode("utf-8")) > APPLICATION_LIMITS.body_bytes:
+        raise ValueError(f"body exceeds {APPLICATION_LIMITS.body_bytes} bytes")
+
+
+def _validate_inline_attachments(attachments: tuple[InlineAttachment, ...], *, file_count: int) -> None:
+    if any(not isinstance(item, InlineAttachment) for item in attachments):
+        raise ValueError("inline attachments must be InlineAttachment values")
+    if file_count + len(attachments) > APPLICATION_LIMITS.attachments:
+        raise ValueError(f"attachments must contain at most {APPLICATION_LIMITS.attachments} paths")
+    total_size = 0
+    for item in attachments:
+        validate_controlled_string(
+            item.filename,
+            field_name="attachment filename",
+            maximum_bytes=APPLICATION_LIMITS.attachment_path_bytes,
+        )
+        validate_controlled_string(
+            item.content_type,
+            field_name="attachment content type",
+            maximum_bytes=256,
+        )
+        if not isinstance(item.payload, (bytes, bytearray)):
+            raise ValueError("inline attachment payload must be bytes")  # noqa: TRY004 - stable validation contract
+        size = len(item.payload)
+        if size > APPLICATION_LIMITS.attachment_bytes:
+            raise ValueError(f"an attachment exceeds {APPLICATION_LIMITS.attachment_bytes} bytes")
+        total_size += size
+        if total_size > APPLICATION_LIMITS.total_attachment_bytes:
+            raise ValueError(f"attachments exceed {APPLICATION_LIMITS.total_attachment_bytes} bytes in total")
+
+
+def _validate_draft_source(source: DraftSource) -> DraftSource:
+    _validate_recipients((*source.to, *source.cc, *source.bcc), allow_empty=True)
+    _validate_content(source.subject, source.body, ())
+    _validate_optional_html_body(source.html_body)
+    _validate_inline_attachments(source.attachments, file_count=0)
+    _validate_optional_header("in_reply_to", source.in_reply_to)
+    _validate_optional_header("references", source.references)
+    return source
 
 
 def _validate_attachment_paths(attachments: tuple[str, ...]) -> None:
@@ -1327,6 +1422,20 @@ class CreateMailboxService(_MutationWorkflow):
 
 
 class SendService(_MutationWorkflow):
+    async def fetch_draft(self, command: FetchDraftCommand) -> DraftSource:
+        command.validate()
+        account = self._resolve(command.account_name)
+        require_mutation(account.allowed_mutations, "send")
+        self._require_send_capability(account)
+        access = self._open(account, purpose="incoming")
+        require_mutation(access.account.allowed_mutations, "send")
+        self._require_send_capability(access.account)
+        try:
+            source = await _bounded_provider_effect(access.provider.fetch_draft_source(command, access.account))
+        except TimeoutError:
+            raise MutationProviderError("provider request timed out") from None
+        return _validate_draft_source(source)
+
     async def execute(self, command: SendCommand) -> SendMutationOutcome:
         command.validate()
         account = self._resolve(command.account_name)

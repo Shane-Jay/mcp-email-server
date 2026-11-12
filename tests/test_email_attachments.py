@@ -1253,7 +1253,7 @@ class TestForwardedPartSerialization:
             message = email_client.compose_message(
                 ["dest@example.com"],
                 "Fwd: Photo",
-                "---------- Forwarded message ----------\nFrom: Ada\nRecipients: Me\nSubject: Photo\n\nHi",
+                "---------- Forwarded message ----------\nFrom: Ada\nTo: Me\nSubject: Photo\n\nHi",
                 extra_parts=[part],
             )
         payloads = [item.get_payload(decode=True) for item in message.walk() if item.get_filename() == "photo.jpg"]
@@ -1344,35 +1344,37 @@ class TestMalformedForwardSource:
 
 
 class TestFormatForwardedText:
-    """The quoted block reports the source headers with a neutral recipient label."""
+    """The quoted block reports the source To header and Cc when present."""
 
     def test_block_shape(self):
         block = _format_forwarded_text(
             "Sender Name <sender@example.com>",
-            ["rcpt@example.com", "cc@example.com"],
+            ["rcpt@example.com"],
             "Fri, 8 May 2026 19:17:09 +0200",
             "Quarterly package",
             "Hallo Welt",
+            cc=["cc@example.com"],
         )
         assert block == (
             "---------- Forwarded message ----------\n"
             "From: Sender Name <sender@example.com>\n"
-            "Recipients: rcpt@example.com, cc@example.com\n"
+            "To: rcpt@example.com\n"
+            "Cc: cc@example.com\n"
             "Date: Fri, 8 May 2026 19:17:09 +0200\n"
             "Subject: Quarterly package\n"
             "\n"
             "Hallo Welt"
         )
 
-    def test_recipients_label_is_used_because_the_list_folds_in_cc(self):
-        """ "To:" would misreport a list that already merged Cc entries."""
+    def test_to_label_is_used_for_the_to_header(self):
         block = _format_forwarded_text("a@example.com", ["b@example.com"], "date", "subject", "body")
-        assert "Recipients: b@example.com" in block
-        assert "\nTo:" not in block
+        assert "To: b@example.com" in block
+        assert "Recipients:" not in block
+        assert "\nCc:" not in block
 
-    def test_empty_recipients_render_as_an_empty_field(self):
+    def test_empty_to_renders_as_an_empty_field(self):
         block = _format_forwarded_text("a@example.com", [], "date", "subject", "body")
-        assert "Recipients: \n" in block
+        assert "To: \n" in block
 
 
 class TestFetchForwardSource:
@@ -1416,7 +1418,8 @@ class TestFetchForwardSource:
         # the source's own offset, unlike the UTC-normalized datetime in the parse result.
         assert result["date"] == "Fri, 08 May 2026 19:17:09 +0200"
         assert result["body"].startswith("---------- Forwarded message ----------\n")
-        assert "Recipients: rcpt@example.com, cc@example.com" in result["body"]
+        assert "To: rcpt@example.com" in result["body"]
+        assert "Cc: cc@example.com" in result["body"]
         assert result["body"].endswith("Hallo Welt")
         assert [part.get_content_type() for part in result["parts"]] == [
             "application/vnd.ms-excel",
@@ -1432,7 +1435,8 @@ class TestFetchForwardSource:
         result = await self._run(email_client, _build_forward_source_email(), include_attachments=False)
 
         assert result["parts"] == []
-        assert "Recipients: rcpt@example.com, cc@example.com" in result["body"]
+        assert "To: rcpt@example.com" in result["body"]
+        assert "Cc: cc@example.com" in result["body"]
         assert result["subject"] == "Quarterly package"
 
     @pytest.mark.asyncio

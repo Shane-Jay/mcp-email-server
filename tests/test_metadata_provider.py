@@ -174,7 +174,7 @@ async def test_header_snapshot_fetches_flags_without_marking_messages_seen() -> 
     result = await client._batch_fetch_headers(imap, ["9"], include_flags=True)
 
     assert result["9"]["_flags"] == ["\\Seen", "\\Flagged"]
-    imap.uid.assert_awaited_once_with("fetch", "9", "(FLAGS BODY.PEEK[HEADER]<0.65537>)")
+    imap.uid.assert_awaited_once_with("fetch", "9", "(FLAGS BODY.PEEK[HEADER]<0.65537> BODYSTRUCTURE)")
 
 
 @pytest.mark.asyncio
@@ -184,7 +184,7 @@ async def test_header_fetch_uses_partial_requests_with_wire_bounded_uid_chunks()
     raw_headers = b"From: sender@example.test\r\nSubject: Test\r\n\r\n"
 
     async def fetch(_command: str, uid_list: str, fetch_item: str):
-        assert fetch_item == "BODY.PEEK[HEADER]<0.65537>"
+        assert fetch_item == "(BODY.PEEK[HEADER]<0.65537> BODYSTRUCTURE)"
         requested = uid_list.split(",")
         assert len(requested) <= MAX_METADATA_HEADER_FETCH_UIDS
         data: list[bytes | bytearray] = []

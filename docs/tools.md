@@ -255,9 +255,10 @@ names that map to those keywords. Unknown keywords remain visible in
 `provider_keywords`; standard flags remain
 separate. To and Cc are parsed as structured RFC 5322 address fields: a comma inside
 a quoted display name is preserved, while addresses inside a group are returned
-as individual recipient entries. Because this operation fetches headers only,
-its `attachments` field is empty. `get_emails_content` populates attachment names
-from the full message.
+as individual recipient entries. `attachments` lists filenames taken from IMAP
+`BODYSTRUCTURE` without downloading bodies. `attachment_info` adds each part's
+filename, encoded size in octets, and `type/subtype`. `get_emails_content` still
+returns attachment names from the full MIME parse.
 
 `has_attachment` uses a `multipart/mixed` heuristic. It can miss inline content
 or report multipart messages that do not contain a conventional attachment.
@@ -634,9 +635,8 @@ source subject that already begins with `Fwd:` in any letter case is not
 prefixed a second time.
 
 The forwarded content is appended below the caller's note as a plain-text
-`Forwarded message` block reporting the original's From, Recipients, Date, and
-Subject. That block reports `Recipients:` rather than `To:` because the parsed
-recipient list folds in Cc entries.
+`Forwarded message` block reporting the original's From, To, Date, and
+Subject. When the source has a Cc header, a `Cc:` line is included.
 
 The block is re-composed from the parsed plain-text body, so the original's HTML
 formatting is not preserved in the quoted text. The forwarded content is never
@@ -888,8 +888,12 @@ Reads one named attachment as an MCP embedded binary resource without writing a
 server-host file. The content-only result carries an opaque `email-attachment://`
 URI, original filename, MIME type, decoded byte size, and one copy of the blob.
 It is independently enabled with `enable_attachment_content=true`; enabling file
-download does not enable MCP content transfer. The complete serialized tool
-result must fit the server's existing global result ceiling.
+download does not enable MCP content transfer. The tool must also be present in
+the advertised catalog: if `MCP_EMAIL_SERVER_TOOL_ALLOW` is set, include
+`get_attachment_content` in that list (and do not put it in
+`MCP_EMAIL_SERVER_TOOL_DENY`). Both the policy flag and the tool filter are
+required. The complete serialized tool result must fit the server's existing
+global result ceiling.
 
 ### `download_attachment`
 

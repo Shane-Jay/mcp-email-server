@@ -8,6 +8,14 @@ from mcp_email_server.application.limits import APPLICATION_LIMITS
 EmailTag = Annotated[str, Field(max_length=APPLICATION_LIMITS.flag_bytes)]
 
 
+class AttachmentInfo(BaseModel):
+    """Attachment metadata from IMAP BODYSTRUCTURE (no body download)."""
+
+    filename: str = Field(max_length=APPLICATION_LIMITS.attachment_path_bytes)
+    size: int | None = Field(default=None, ge=0)
+    content_type: str | None = Field(default=None, max_length=256)
+
+
 class EmailMetadata(BaseModel):
     """Email metadata"""
 
@@ -18,11 +26,18 @@ class EmailMetadata(BaseModel):
     recipients: list[str]  # Recipient list
     date: datetime
     attachments: list[str]
+    attachment_info: list[AttachmentInfo] = Field(default_factory=list, max_length=APPLICATION_LIMITS.attachments)
     provider_keywords: list[EmailTag] = Field(default_factory=list, max_length=APPLICATION_LIMITS.flags)
     semantic_tags: list[EmailTag] = Field(default_factory=list, max_length=APPLICATION_LIMITS.flags)
 
     @classmethod
     def from_email(cls, email: dict[str, Any]):
+        attachments = email.get("attachments") or []
+        raw_info = email.get("attachment_info")
+        if raw_info is None:
+            raw_info = [
+                {"filename": name, "size": None, "content_type": None} for name in attachments if isinstance(name, str)
+            ]
         return cls(
             email_id=email["email_id"],
             message_id=email.get("message_id"),
@@ -30,7 +45,8 @@ class EmailMetadata(BaseModel):
             sender=email["from"],
             recipients=email.get("to", []),
             date=email["date"],
-            attachments=email["attachments"],
+            attachments=attachments,
+            attachment_info=[AttachmentInfo.model_validate(item) for item in raw_info],
             provider_keywords=[
                 flag for flag in email.get("_flags", []) if isinstance(flag, str) and not flag.startswith("\\")
             ],

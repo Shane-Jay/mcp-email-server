@@ -156,7 +156,11 @@ class TestComposeMessage:
             body="<b>bold</b>",
             html=True,
         )
-        assert msg.get_content_type() == "text/html"
+        assert msg.get_content_type() == "multipart/alternative"
+        parts = list(msg.get_payload())
+        assert [part.get_content_type() for part in parts] == ["text/plain", "text/html"]
+        assert b"bold" in parts[0].get_payload(decode=True)
+        assert parts[1].get_payload(decode=True) == b"<b>bold</b>"
 
     def test_cc_header(self, email_client):
         msg = email_client.compose_message(
@@ -267,6 +271,22 @@ class TestComposeMessage:
             attachments=[str(test_file)],
         )
         assert msg.get_content_type() == "multipart/mixed"
+
+    def test_html_with_attachment_wraps_alternative_in_mixed(self, email_client, tmp_path):
+        test_file = tmp_path / "doc.txt"
+        test_file.write_text("file content")
+        msg = email_client.compose_message(
+            recipients=["r@example.com"],
+            subject="HTML attach",
+            body="<p>see attached</p>",
+            html=True,
+            attachments=[str(test_file)],
+        )
+        assert msg.get_content_type() == "multipart/mixed"
+        body_part, attachment = msg.get_payload()
+        assert body_part.get_content_type() == "multipart/alternative"
+        assert [part.get_content_type() for part in body_part.get_payload()] == ["text/plain", "text/html"]
+        assert attachment.get_filename() == "doc.txt"
 
 
 @pytest.mark.parametrize(

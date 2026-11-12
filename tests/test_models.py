@@ -45,6 +45,7 @@ class TestEmailMetadata:
         assert email_data.recipients == ["recipient@example.com"]
         assert email_data.date == now
         assert email_data.attachments == ["file1.txt", "file2.pdf"]
+        assert [item.filename for item in email_data.attachment_info] == ["file1.txt", "file2.pdf"]
 
     def test_from_email_with_message_id(self):
         """Test from_email extracts message_id when present."""

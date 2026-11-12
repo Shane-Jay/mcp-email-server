@@ -225,10 +225,10 @@ seeder and observer, so the system is not solely verifying itself.
 | Index         | initial projection, qualified SQLite reuse, filter fallback, bounds, and restart reuse are verified                  |
 | Mutations     | explicit move, automatic archive selection, draft save, and delete are observed in IMAP                              |
 
-`list_emails_metadata` currently fetches headers only and therefore returns an
-empty attachment list. Attachment names are verified through
-`get_emails_content`, which fetches and parses the complete MIME message. The
-baseline records this existing contract rather than silently changing it.
+`list_emails_metadata` fetches headers plus IMAP `BODYSTRUCTURE` so attachment
+filenames, encoded sizes, and content types appear in metadata without
+downloading bodies. `get_emails_content` still parses the complete MIME message
+for names and decoded content.
 The E2E suite also inspects only non-secret projection state to verify that a
 complete five-message mailbox is persisted once, reused for a second page, and
 reused after restarting the packaged stdio process. Subject, address, flag,

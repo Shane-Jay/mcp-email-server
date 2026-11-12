@@ -291,18 +291,24 @@ def _strip_to_content_headers(part: Message) -> Message:
     return clone
 
 
-def _format_forwarded_text(sender: str, recipients: Sequence[str], date: str, subject: str, body: str) -> str:
+def _format_forwarded_text(
+    sender: str,
+    to_addresses: Sequence[str],
+    date: str,
+    subject: str,
+    body: str,
+    *,
+    cc: Sequence[str] = (),
+) -> str:
     """Build the plain-text forwarded-message block quoted below the caller's note.
 
     An empty ``date`` omits the line: a source without a Date header must not have
-    a composed-at timestamp fabricated as its provenance.
+    a composed-at timestamp fabricated as its provenance. ``to_addresses`` is the
+    original To header; ``cc`` is included as its own line when present.
     """
-    header = (
-        "---------- Forwarded message ----------\n"
-        f"From: {sender}\n"
-        # Neutral label: the parsed recipient list folds in Cc, so "To:" would mislead.
-        f"Recipients: {', '.join(recipients)}\n"
-    )
+    header = f"---------- Forwarded message ----------\nFrom: {sender}\nTo: {', '.join(to_addresses)}\n"
+    if cc:
+        header += f"Cc: {', '.join(cc)}\n"
     if date:
         header += f"Date: {date}\n"
     header += f"Subject: {subject}\n"
@@ -950,6 +956,151 @@ def _html_to_text(html: str) -> str:
     text = re.sub(r"\n\s*\n", "\n\n", text)
     text = re.sub(r"[ \t]+", " ", text)
     return text.strip()
+
+
+def _parse_imap_sexp(text: str, index: int = 0) -> tuple[Any, int]:  # noqa: C901 - IMAP s-expression tokenizer
+    """Parse one IMAP parenthesized list, quoted string, NIL, number, or atom."""
+    length = len(text)
+    while index < length and text[index] in " \t\r\n":
+        index += 1
+    if index >= length:
+        raise ValueError("truncated IMAP list")
+    char = text[index]
+    if char == "(":
+        items: list[Any] = []
+        index += 1
+        while True:
+            while index < length and text[index] in " \t\r\n":
+                index += 1
+            if index >= length:
+                raise ValueError("unterminated IMAP list")
+            if text[index] == ")":
+                return items, index + 1
+            value, index = _parse_imap_sexp(text, index)
+            items.append(value)
+    if char == '"':
+        index += 1
+        chars: list[str] = []
+        while index < length:
+            current = text[index]
+            if current == "\\":
+                index += 1
+                if index >= length:
+                    raise ValueError("truncated IMAP quoted string")
+                chars.append(text[index])
+                index += 1
+                continue
+            if current == '"':
+                return "".join(chars), index + 1
+            chars.append(current)
+            index += 1
+        raise ValueError("unterminated IMAP quoted string")
+    start = index
+    while index < length and text[index] not in " \t\r\n()":
+        index += 1
+    atom = text[start:index]
+    if not atom:
+        raise ValueError("empty IMAP atom")
+    if atom.upper() == "NIL":
+        return None, index
+    if atom.isdigit() or (atom.startswith("-") and atom[1:].isdigit()):
+        return int(atom), index
+    return atom, index
+
+
+def _imap_param_map(value: Any) -> dict[str, str]:
+    """Flatten an IMAP body-fld-param list of alternating name/value pairs."""
+    if not isinstance(value, list):
+        return {}
+    params: dict[str, str] = {}
+    for name, raw in zip(value[0::2], value[1::2], strict=False):
+        if isinstance(name, str) and isinstance(raw, (str, int)):
+            params[name.upper()] = str(raw)
+    return params
+
+
+def _imap_disposition(part: list[Any]) -> tuple[str | None, dict[str, str]]:
+    """Return Content-Disposition type and params from a BODYSTRUCTURE part."""
+    for item in part:
+        if not isinstance(item, list) or not item or not isinstance(item[0], str):
+            continue
+        kind = item[0].upper()
+        if kind in {"ATTACHMENT", "INLINE"}:
+            params = _imap_param_map(item[1] if len(item) > 1 else None)
+            return kind, params
+    return None, {}
+
+
+def _attachment_info_from_basic(part: list[Any]) -> dict[str, Any] | None:
+    """Classify one non-multipart BODYSTRUCTURE leaf as an attachment, if any."""
+    if len(part) < 2 or not isinstance(part[0], str) or not isinstance(part[1], str):
+        return None
+    main_type = part[0].lower()
+    sub_type = part[1].lower()
+    content_type = f"{main_type}/{sub_type}"
+    params = _imap_param_map(part[2] if len(part) > 2 else None)
+    disposition, disposition_params = _imap_disposition(part)
+    filename = disposition_params.get("FILENAME") or params.get("NAME")
+    size = part[6] if len(part) > 6 and isinstance(part[6], int) and part[6] >= 0 else None
+    is_message = main_type == "message" and sub_type == "rfc822"
+    if disposition == "ATTACHMENT" or filename or is_message:
+        return {
+            "filename": filename or "attachment",
+            "size": size,
+            "content_type": content_type,
+        }
+    return None
+
+
+def attachments_from_bodystructure(structure: Any) -> tuple[list[str], list[dict[str, Any]]]:
+    """Walk an IMAP BODYSTRUCTURE value and collect attachment filename/size/type.
+
+    Multipart attachment roots (named or ``Content-Disposition: attachment``) are
+    kept as one entry without descending, matching :meth:`EmailClient._iter_content_parts`.
+    """
+    info: list[dict[str, Any]] = []
+
+    def walk(node: Any) -> None:
+        if not isinstance(node, list) or not node:
+            return
+        if isinstance(node[0], list):
+            disposition, params = _imap_disposition(node)
+            filename = params.get("FILENAME")
+            subtype = next((item for item in node if isinstance(item, str)), "mixed")
+            if disposition == "ATTACHMENT" or filename:
+                info.append({
+                    "filename": filename or "attachment",
+                    "size": None,
+                    "content_type": f"multipart/{subtype.lower()}",
+                })
+                return
+            for item in node:
+                if isinstance(item, list):
+                    walk(item)
+                elif isinstance(item, str):
+                    break
+            return
+        attachment = _attachment_info_from_basic(node)
+        if attachment is not None:
+            info.append(attachment)
+
+    walk(structure)
+    names = [item["filename"] for item in info if isinstance(item.get("filename"), str) and item["filename"]]
+    return names, info
+
+
+def _extract_bodystructure(protocol_items: Sequence[bytes]) -> Any | None:
+    """Parse ``BODYSTRUCTURE`` from FETCH protocol lines surrounding one UID."""
+    blob = b" ".join(item for item in protocol_items if isinstance(item, bytes))
+    match = re.search(rb"BODYSTRUCTURE\s*(\()", blob, flags=re.IGNORECASE)
+    if match is None:
+        return None
+    text = blob[match.start(1) :].decode("utf-8", "replace")
+    try:
+        value, _ = _parse_imap_sexp(text)
+    except ValueError:
+        return None
+    return value
 
 
 def _discard_imap_after_sync_failure(
@@ -1917,10 +2068,9 @@ class EmailClient:
     def _parse_headers(self, email_id: str, raw_headers: bytes) -> dict[str, Any] | None:
         """Parse raw email headers into metadata dictionary.
 
-        Note: this parses only header data (BODY.PEEK[HEADER]) so it cannot
-        populate the attachments list — that requires fetching BODYSTRUCTURE
-        or the full body. The attachments list is intentionally returned
-        empty here; ``_parse_email_data`` populates it from the full body.
+        Note: this parses only header data (BODY.PEEK[HEADER]). Attachment
+        names and BODYSTRUCTURE details are filled by ``_batch_fetch_headers``
+        when the FETCH includes BODYSTRUCTURE.
         """
         try:
             parser = BytesParser(policy=default)
@@ -1945,6 +2095,7 @@ class EmailClient:
                 "to_addresses": header_to,
                 "date": date,
                 "attachments": [],
+                "attachment_info": [],
             }
         except Exception:
             logger.error("Error parsing email headers")
@@ -2039,7 +2190,8 @@ class EmailClient:
         results: dict[str, dict[str, Any]] = {}
         budget = header_budget or _MetadataHeaderBudget()
         partial = f"<0.{MAX_METADATA_HEADER_BYTES + 1}>"
-        fetch_item = f"(FLAGS BODY.PEEK[HEADER]{partial})" if include_flags else f"BODY.PEEK[HEADER]{partial}"
+        header_item = f"BODY.PEEK[HEADER]{partial}"
+        fetch_item = f"(FLAGS {header_item} BODYSTRUCTURE)" if include_flags else f"({header_item} BODYSTRUCTURE)"
         chunk_size = min(chunk_size, _header_fetch_uid_limit())
         for start in range(0, len(str_ids), chunk_size):
             chunk = str_ids[start : start + chunk_size]
@@ -2082,6 +2234,11 @@ class EmailClient:
                         metadata["_flags"] = (
                             flags_match.group(1).decode(errors="replace").split() if flags_match is not None else []
                         )
+                    structure = _extract_bodystructure(protocol_items)
+                    if structure is not None:
+                        names, info = attachments_from_bodystructure(structure)
+                        metadata["attachments"] = names
+                        metadata["attachment_info"] = info
                     results[uid] = metadata
         return results
 
@@ -3134,6 +3291,8 @@ class EmailClient:
                 ]
 
             recipients = email_data["to"]
+            header_to = self._parse_address_field(email_message, "To")
+            header_cc = self._parse_address_field(email_message, "Cc")
             # No fabricated provenance: a source without a Date header yields an
             # empty date and the quoting block omits the line entirely.
             date = _first_thread_header(email_message, "Date") or ""
@@ -3146,7 +3305,12 @@ class EmailClient:
                 "recipients": recipients,
                 "date": date,
                 "body": _format_forwarded_text(
-                    email_data["from"], recipients, date, email_data["subject"], email_data["body"]
+                    email_data["from"],
+                    header_to,
+                    date,
+                    email_data["subject"],
+                    email_data["body"],
+                    cc=header_cc,
                 ),
                 "parts": parts,
             }
@@ -3155,6 +3319,113 @@ class EmailClient:
                 await _best_effort_imap_logout(imap)
             except Exception:
                 logger.info("IMAP logout failed")
+
+    async def fetch_draft_source(
+        self,
+        email_id: str,
+        mailbox: str = "Drafts",
+        allowed_senders: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Read one stored draft and return the fields needed to submit it.
+
+        To, Cc, and Bcc stay separate. HTML and plain bodies are both retained
+        when the draft stored a multipart/alternative. Attachment parts keep
+        their filename, MIME type, and decoded bytes.
+        """
+        validate_imap_uid(email_id)
+        imap = await self._connect_imap()
+        try:
+            await _imap_login(imap, self.email_server.user_name, self.email_server.password.get_secret_value())
+            await _send_imap_id(imap)
+            select_response = await imap.select(_quote_mailbox(mailbox))
+            _raise_for_imap_error(select_response, f"SELECT mailbox {mailbox}")
+            await self._enforce_sender_allowlist(imap, email_id, allowed_senders)
+
+            data = await self._fetch_email_with_formats(imap, email_id)
+            if not data:
+                msg = f"Failed to fetch email with UID {email_id}"
+                logger.error(msg)
+                raise ValueError(msg)
+
+            raw_email = self._extract_raw_email(data)
+            if not raw_email:
+                msg = f"Could not find email data for email ID: {email_id}"
+                logger.error(msg)
+                raise ValueError(msg)
+            if len(raw_email) > MAX_RAW_EMAIL_BYTES:
+                raise ValueError("Email exceeds the raw message size limit")
+
+            try:
+                email_message = BytesParser(policy=default).parsebytes(raw_email)
+            except Exception as error:
+                log_provider_failure(f"Could not parse email {email_id} for sending", error)
+                raise ValueError(f"Could not parse email {email_id} for sending") from error
+            return self._draft_payload_from_message(email_message)
+        finally:
+            try:
+                await _best_effort_imap_logout(imap)
+            except Exception:
+                logger.info("IMAP logout failed")
+
+    def _draft_payload_from_message(self, email_message: Message) -> dict[str, Any]:
+        """Split a stored draft into To/Cc/Bcc, bodies, and in-memory attachments."""
+        plain_parts: list[str] = []
+        html_parts: list[str] = []
+        attachments: list[dict[str, Any]] = []
+        total_attachment_bytes = 0
+        for part, is_attachment in self._iter_content_parts(email_message):
+            if is_attachment:
+                payload, byte_size = self._bounded_draft_attachment(part)
+                total_attachment_bytes += byte_size
+                self._validate_total_attachment_bytes(total_attachment_bytes)
+                filename = part.get_filename()
+                attachments.append({
+                    "filename": filename if isinstance(filename, str) and filename else "attachment",
+                    "content_type": part.get_content_type() or "application/octet-stream",
+                    "payload": payload,
+                })
+                continue
+            content_type = part.get_content_type()
+            if content_type == "text/plain":
+                plain_parts.append(self._decode_text_part(part))
+            elif content_type == "text/html":
+                html_parts.append(self._decode_text_part(part))
+        body, html, html_body = self._draft_bodies(plain_parts, html_parts)
+        return {
+            "to": self._parse_address_field(email_message, "To"),
+            "cc": self._parse_address_field(email_message, "Cc"),
+            "bcc": self._parse_address_field(email_message, "Bcc"),
+            "subject": str(email_message.get("Subject", "") or ""),
+            "body": body,
+            "html": html,
+            "html_body": html_body,
+            "attachments": attachments,
+            "in_reply_to": _first_thread_header(email_message, "In-Reply-To"),
+            "references": _first_thread_header(email_message, "References"),
+        }
+
+    def _bounded_draft_attachment(self, part: Message) -> tuple[bytes, int]:
+        payload = self._attachment_content(part) or b""
+        if len(payload) > MAX_ATTACHMENT_BYTES:
+            raise ValueError(f"an attachment exceeds {MAX_ATTACHMENT_BYTES} bytes")
+        return payload, len(payload)
+
+    @staticmethod
+    def _draft_bodies(plain_parts: list[str], html_parts: list[str]) -> tuple[str, bool, str | None]:
+        plain_body = "".join(plain_parts)
+        html_content = "".join(html_parts)
+        html = bool(html_content)
+        if html and plain_body:
+            body, html_body = plain_body, html_content
+        elif html:
+            body, html_body = html_content, None
+        else:
+            body, html_body = plain_body, None
+        if len(body.encode("utf-8")) > APPLICATION_LIMITS.body_bytes:
+            raise ValueError(f"body exceeds {APPLICATION_LIMITS.body_bytes} bytes")
+        if html_body is not None and len(html_body.encode("utf-8")) > APPLICATION_LIMITS.body_bytes:
+            raise ValueError(f"body exceeds {APPLICATION_LIMITS.body_bytes} bytes")
+        return body, html, html_body
 
     def _validate_attachment(self, file_path: str) -> Path:
         """Validate attachment file path and enforce the outgoing allowlist."""
@@ -3178,18 +3449,39 @@ class EmailClient:
         mime_type, _ = mimetypes.guess_type(str(path))
         if mime_type is None:
             mime_type = "application/octet-stream"
-        main_type, sub_type = mime_type.split("/", 1)
+        return self.attachment_part_from_bytes(path.name, mime_type, file_data)
 
+    @staticmethod
+    def attachment_part_from_bytes(filename: str, mime_type: str, file_data: bytes) -> MIMEBase:
+        """Create one base64 attachment part from in-memory bytes."""
+        if "/" not in mime_type:
+            mime_type = "application/octet-stream"
+        main_type, sub_type = mime_type.split("/", 1)
         attachment_part = MIMEBase(main_type, sub_type)
         attachment_part.set_payload(file_data)
         encoders.encode_base64(attachment_part)
         attachment_part.add_header(
             "Content-Disposition",
             "attachment",
-            filename=path.name,
+            filename=filename,
         )
-        logger.info(f"Attached file: {path.name} ({mime_type})")
+        logger.info(f"Attached file: {filename} ({mime_type})")
         return attachment_part
+
+    @staticmethod
+    def _compose_body_entity(body: str, html: bool, html_body: str | None) -> MIMEText | MIMEMultipart:
+        """Build the text body, wrapping HTML in multipart/alternative with a plain fallback."""
+        if not html:
+            return MIMEText(body, "plain", "utf-8")
+        html_content = html_body if html_body is not None else body
+        if html_body is not None:
+            plain_content = body if body.strip() else _html_to_text(html_content)
+        else:
+            plain_content = _html_to_text(html_content)
+        alternative = MIMEMultipart("alternative")
+        alternative.attach(MIMEText(plain_content or " ", "plain", "utf-8"))
+        alternative.attach(MIMEText(html_content, "html", "utf-8"))
+        return alternative
 
     def _create_message_with_attachments(
         self,
@@ -3197,12 +3489,11 @@ class EmailClient:
         html: bool,
         attachments: list[str] | None,
         extra_parts: list[Message] | None = None,
+        html_body: str | None = None,
     ) -> MIMEMultipart:
         """Create multipart message with attachments and already-built MIME parts."""
         msg = MIMEMultipart()
-        content_type = "html" if html else "plain"
-        text_part = MIMEText(body, content_type, "utf-8")
-        msg.attach(text_part)
+        msg.attach(self._compose_body_entity(body, html, html_body))
 
         total_attachment_bytes = 0
         for file_path in attachments or []:
@@ -3249,6 +3540,7 @@ class EmailClient:
         reply_to: str | None = None,
         *,
         extra_parts: list[Message] | None = None,
+        html_body: str | None = None,
     ) -> MIMEText | MIMEMultipart:
         """Compose an email message without sending it.
 
@@ -3264,14 +3556,17 @@ class EmailClient:
         ``extra_parts`` carries already-built MIME parts (a forward's re-attached
         source parts) into the same multipart container as file attachments. It is
         keyword-only so existing positional call sites keep their meaning.
+
+        HTML bodies are always wrapped in ``multipart/alternative`` with an
+        auto-generated text/plain fallback unless ``html_body`` supplies HTML
+        while ``body`` already holds the plain counterpart.
         """
         envelope_sender = self.envelope_sender
 
         if attachments or extra_parts:
-            msg = self._create_message_with_attachments(body, html, attachments, extra_parts)
+            msg = self._create_message_with_attachments(body, html, attachments, extra_parts, html_body)
         else:
-            content_type = "html" if html else "plain"
-            msg = MIMEText(body, content_type, "utf-8")
+            msg = self._compose_body_entity(body, html, html_body)
 
         # Handle subject with special characters
         if any(ord(c) > 127 for c in subject):
@@ -3336,6 +3631,7 @@ class EmailClient:
         reply_to: str | None = None,
         *,
         extra_parts: list[Message] | None = None,
+        html_body: str | None = None,
     ) -> DeliveryMutationOutcome:
         """Run one SMTP transaction and preserve phase-specific delivery evidence."""
         msg = self.compose_message(
@@ -3351,6 +3647,7 @@ class EmailClient:
             False,
             reply_to,
             extra_parts=extra_parts,
+            html_body=html_body,
         )
         all_recipients = [*recipients, *(cc or []), *(bcc or [])]
         envelope_recipients = [email.utils.parseaddr(recipient)[1] for recipient in all_recipients]

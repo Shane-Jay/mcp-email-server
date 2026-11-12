@@ -63,6 +63,38 @@ class IndexedIncrementalBaseline:
     emails: tuple[dict[str, Any], ...]
 
 
+def _decode_attachment_projection(raw: object) -> tuple[list[str], list[dict[str, Any]] | None]:
+    """Accept legacy filename lists or structured BODYSTRUCTURE rows."""
+    if not isinstance(raw, list):
+        _fail("Indexed metadata is malformed")
+    if not raw or all(isinstance(item, str) for item in raw):
+        if not all(isinstance(item, str) for item in raw):
+            _fail("Indexed metadata is malformed")
+        return list(raw), None
+    names: list[str] = []
+    info: list[dict[str, Any]] = []
+    for item in raw:
+        if not isinstance(item, dict) or not isinstance(item.get("filename"), str):
+            _fail("Indexed metadata is malformed")
+        filename = item["filename"]
+        size = item.get("size")
+        content_type = item.get("content_type")
+        if size is not None and (not isinstance(size, int) or isinstance(size, bool) or size < 0):
+            _fail("Indexed metadata is malformed")
+        if content_type is not None and not isinstance(content_type, str):
+            _fail("Indexed metadata is malformed")
+        names.append(filename)
+        info.append({"filename": filename, "size": size, "content_type": content_type})
+    return names, info
+
+
+def _encode_attachment_projection(email: dict[str, Any]) -> str:
+    info = email.get("attachment_info")
+    if isinstance(info, list) and info and all(isinstance(item, dict) and "filename" in item for item in info):
+        return json.dumps(info, separators=(",", ":"))
+    return json.dumps(email.get("attachments", []), separators=(",", ":"))
+
+
 def _utc_text(value: datetime) -> str:
     if value.tzinfo is None:
         value = value.replace(tzinfo=UTC)
@@ -104,13 +136,12 @@ def _load_projected_emails(
             break
         for row in rows:
             recipients = json.loads(row["recipients_json"])
-            attachments = json.loads(row["attachment_names_json"])
+            attachments_raw = json.loads(row["attachment_names_json"])
             flags = json.loads(row["flags_json"])
+            attachments, attachment_info = _decode_attachment_projection(attachments_raw)
             if not (
                 isinstance(recipients, list)
                 and all(isinstance(item, str) for item in recipients)
-                and isinstance(attachments, list)
-                and all(isinstance(item, str) for item in attachments)
                 and isinstance(flags, list)
                 and all(isinstance(item, str) for item in flags)
             ):
@@ -129,6 +160,7 @@ def _load_projected_emails(
                 **({"to_addresses": to_addresses} if to_addresses is not None else {}),
                 "date": _parse_utc(row["message_date"]),
                 "attachments": attachments,
+                **({"attachment_info": attachment_info} if attachment_info is not None else {}),
                 "_internal_date": _parse_utc(row["internal_date"]) if row["internal_date"] else None,
                 "_flags": flags,
             })
@@ -628,7 +660,7 @@ class MetadataIndex:
                             json.dumps(email.get("to", []), separators=(",", ":")),
                             _utc_text(message_date),
                             _utc_text(internal_date) if internal_date is not None else None,
-                            json.dumps(email.get("attachments", []), separators=(",", ":")),
+                            _encode_attachment_projection(email),
                             json.dumps(email.get("_flags", []), separators=(",", ":")),
                             timestamp,
                             json.dumps(to_addresses, separators=(",", ":")) if to_addresses is not None else None,

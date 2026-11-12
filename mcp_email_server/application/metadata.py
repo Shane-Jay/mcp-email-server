@@ -530,6 +530,10 @@ def _validate_metadata_response(
         + len(email.sender.encode("utf-8"))
         + sum(len(value.encode("utf-8")) for value in email.recipients)
         + sum(len(value.encode("utf-8")) for value in email.attachments)
+        + sum(
+            len(item.filename.encode("utf-8")) + len((item.content_type or "").encode("utf-8"))
+            for item in email.attachment_info
+        )
         + sum(len(value.encode("utf-8")) for value in email.provider_keywords)
         + sum(len(value.encode("utf-8")) for value in email.semantic_tags)
         for email in response.emails

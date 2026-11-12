@@ -24,9 +24,12 @@ from mcp_email_server.application.mutations import (
     DeleteCommand,
     DeliveryMutationOutcome,
     DraftAppendCommand,
+    DraftSource,
+    FetchDraftCommand,
     ForwardCommand,
     ForwardSource,
     ForwardSourcePart,
+    InlineAttachment,
     MailboxCreationStatus,
     MoveCommand,
     MutationAccountSnapshot,
@@ -157,6 +160,11 @@ class ClassicMutationProvider:
         account: MutationAccountSnapshot,
     ) -> AppendMutationOutcome:
         self._guard(account, "draft" if isinstance(command, DraftAppendCommand) else "append", command)
+        extra_parts: list[Message] = []
+        for item in command.inline_attachments:
+            extra_parts.append(
+                self._handler.incoming_client.attachment_part_from_bytes(item.filename, item.content_type, item.payload)
+            )
         message = self._handler.incoming_client.compose_message(
             list(command.recipients),
             command.subject,
@@ -168,6 +176,8 @@ class ClassicMutationProvider:
             command.in_reply_to,
             command.references,
             include_bcc_header=True,
+            extra_parts=extra_parts or None,
+            html_body=command.html_body,
         )
         flags = r"(\Draft \Seen)" if command.flags is None else _validate_flags(list(command.flags))
         return await _bounded_mutation_call(
@@ -261,6 +271,9 @@ class ClassicMutationProvider:
         client = self._handler.outgoing_client
         if client is None:
             raise MutationProviderError("capability_unavailable: SMTP is not configured for this account")
+        combined_parts: list[Message] = list(extra_parts or [])
+        for item in command.inline_attachments:
+            combined_parts.append(client.attachment_part_from_bytes(item.filename, item.content_type, item.payload))
         return await _bounded_mutation_call(
             client.send_email_with_outcome(
                 list(command.recipients),
@@ -273,7 +286,8 @@ class ClassicMutationProvider:
                 command.in_reply_to,
                 command.references,
                 reply_to,
-                extra_parts=extra_parts,
+                extra_parts=combined_parts or None,
+                html_body=command.html_body,
             )
         )
 
@@ -320,6 +334,44 @@ class ClassicMutationProvider:
         # Sentinel ValueErrors (missing, blocked, unreadable, oversized, unparseable)
         # reach the workflow unchanged; anything else is sanitized before it escapes.
         return await _bounded_mutation_call(self._read_forward_source(command, account))
+
+    async def _read_draft_source(
+        self,
+        command: FetchDraftCommand,
+        account: MutationAccountSnapshot,
+    ) -> DraftSource:
+        source = await self._handler.incoming_client.fetch_draft_source(
+            command.email_id,
+            command.mailbox,
+            list(account.allowed_senders),
+        )
+        attachments = tuple(
+            InlineAttachment(
+                filename=str(item["filename"]),
+                content_type=str(item["content_type"]),
+                payload=bytes(item["payload"]),
+            )
+            for item in source["attachments"]
+        )
+        return DraftSource(
+            to=tuple(source["to"]),
+            cc=tuple(source["cc"]),
+            bcc=tuple(source["bcc"]),
+            subject=str(source["subject"]),
+            body=str(source["body"]),
+            html=bool(source["html"]),
+            html_body=source["html_body"] if isinstance(source["html_body"], str) else None,
+            attachments=attachments,
+            in_reply_to=source["in_reply_to"] if isinstance(source["in_reply_to"], str) else None,
+            references=source["references"] if isinstance(source["references"], str) else None,
+        )
+
+    async def fetch_draft_source(
+        self,
+        command: FetchDraftCommand,
+        account: MutationAccountSnapshot,
+    ) -> DraftSource:
+        return await _bounded_mutation_call(self._read_draft_source(command, account))
 
     async def forward(
         self,

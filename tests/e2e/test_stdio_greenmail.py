@@ -1488,6 +1488,12 @@ async def test_current_stdio_server_against_greenmail(tmp_path: Path) -> None:
             )
             _wait_for_message(ALICE, "INBOX", forward_source_subject)
             forward_source_metadata = await _metadata_for_subject(session, "alice", forward_source_subject)
+            assert forwarded_attachment_name in forward_source_metadata["attachments"]
+            attachment_info = forward_source_metadata["attachment_info"]
+            assert any(
+                item["filename"] == forwarded_attachment_name and item.get("content_type") == "application/pdf"
+                for item in attachment_info
+            )
             tagged = await _call_tool(
                 session,
                 "set_email_tags",
@@ -1567,7 +1573,7 @@ async def test_current_stdio_server_against_greenmail(tmp_path: Path) -> None:
             assert forward_note in forwarded_text
             assert "---------- Forwarded message ----------" in forwarded_text
             assert f"From: {BOB[0]}" in forwarded_text
-            assert f"Recipients: {ALICE[0]}" in forwarded_text
+            assert f"To: {ALICE[0]}" in forwarded_text
             assert f"Subject: {forward_source_subject}" in forwarded_text
             assert forward_source_body in forwarded_text
             forwarded_parts = list(forwarded.message.iter_attachments())
@@ -1610,8 +1616,12 @@ async def test_current_stdio_server_against_greenmail(tmp_path: Path) -> None:
             sent_metadata = await _metadata_for_subject(session, "bob", sent_subject)
             assert sent_metadata["sender"].endswith("<alice@example.test>") or sent_metadata["sender"] == ALICE[0]
             assert BOB[0] in sent_metadata["recipients"]
-            # Metadata intentionally excludes thread headers and attachment names; the full-content path supplies them.
-            assert sent_metadata["attachments"] == []
+            # Metadata lists BODYSTRUCTURE attachments; thread headers remain on the full-content path.
+            assert sent_metadata["attachments"] == [attachment_source.name]
+            assert any(
+                item["filename"] == attachment_source.name and item.get("content_type") == "application/octet-stream"
+                for item in sent_metadata["attachment_info"]
+            )
             assert "in_reply_to" not in sent_metadata
             assert "references" not in sent_metadata
 
@@ -2009,3 +2019,91 @@ async def test_protocol_primitives_over_stdio_against_greenmail(tmp_path: Path) 
                 },
             )
             _wait_for_message(BOB, "INBOX", f"smtp-{subject}")
+
+
+@pytest.mark.asyncio
+async def test_send_draft_preserves_html_cc_and_pdf_against_greenmail(tmp_path: Path) -> None:
+    """A stored HTML draft with Cc and a PDF round-trips through send_draft."""
+    _wait_until_ready()
+    _ensure_empty_mailboxes(ALICE, ["INBOX", "Sent", "Drafts"])
+    _ensure_empty_mailboxes(BOB, ["INBOX"])
+
+    run_id = uuid.uuid4().hex
+    subject = f"mcp-e2e-send-draft-{run_id}"
+    html_body = f"<p>Draft HTML {run_id}</p>"
+    pdf_bytes = b"%PDF-1.4 greenmail-send-draft\n"
+    pdf_path = tmp_path / "note.pdf"
+    pdf_path.write_bytes(pdf_bytes)
+
+    config = CONFIG_TEMPLATE.replace(
+        'account_name = "alice"\n',
+        'account_name = "alice"\ndrafts_mailbox = "Drafts"\n',
+    ).replace(
+        'allowed_recipients = ["bob@example.test"]',
+        'allowed_recipients = ["bob@example.test", "alice@example.test"]',
+    )
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(config)
+    config_path.chmod(0o600)
+    server_env = {key: value for key, value in os.environ.items() if not key.startswith("MCP_EMAIL_SERVER_")}
+    server_env.update({
+        "MCP_EMAIL_SERVER_CONFIG_PATH": str(config_path),
+        "MCP_EMAIL_SERVER_CREDENTIAL_STORAGE": "plaintext",
+        "MCP_EMAIL_SERVER_LOG_LEVEL": "WARNING",
+    })
+    server = StdioServerParameters(
+        command=str(Path(sys.executable).with_name("mcp-email-server")),
+        args=["stdio"],
+        env=server_env,
+        cwd=Path.cwd(),
+    )
+
+    async with stdio_client(server) as (read_stream, write_stream):
+        async with ClientSession(
+            read_stream,
+            write_stream,
+            read_timeout_seconds=timedelta(seconds=15),
+        ) as session:
+            await session.initialize()
+            saved = await _call_tool(
+                session,
+                "save_draft",
+                {
+                    "account_name": "alice",
+                    "recipients": [BOB[0]],
+                    "cc": [ALICE[0]],
+                    "subject": subject,
+                    "body": html_body,
+                    "html": True,
+                    "attachments": [str(pdf_path)],
+                },
+            )
+            assert saved["result"].startswith("Draft save [")
+            draft_meta = await _metadata_for_subject_in_mailbox(session, "alice", "Drafts", subject)
+            assert "note.pdf" in draft_meta["attachments"]
+            assert any(
+                item["filename"] == "note.pdf" and str(item.get("content_type", "")).startswith("application/")
+                for item in draft_meta["attachment_info"]
+            )
+
+            sent = await _call_tool(
+                session,
+                "send_draft",
+                {"account_name": "alice", "email_id": draft_meta["email_id"], "mailbox": "Drafts"},
+            )
+            assert sent["result"].startswith(f"Email sent successfully to {BOB[0]}")
+            assert ALICE[0] in sent["result"]
+
+            delivered = _wait_for_message(BOB, "INBOX", subject)
+            html_part = delivered.message.get_body(preferencelist=("html",))
+            plain_part = delivered.message.get_body(preferencelist=("plain",))
+            assert html_part is not None
+            assert html_body in html_part.get_content()
+            assert plain_part is not None
+            assert run_id in plain_part.get_content()
+            assert ALICE[0] in str(delivered.message["Cc"] or "")
+            attachments = list(delivered.message.iter_attachments())
+            assert len(attachments) == 1
+            assert attachments[0].get_filename() == "note.pdf"
+            assert attachments[0].get_content_type() == "application/pdf"
+            assert attachments[0].get_payload(decode=True) == pdf_bytes

@@ -491,6 +491,10 @@ async def test_metadata_aggregate_header_limit_boundaries(
         + len(item.sender.encode("utf-8"))
         + sum(len(value.encode("utf-8")) for value in item.recipients)
         + sum(len(value.encode("utf-8")) for value in item.attachments)
+        + sum(
+            len(part.filename.encode("utf-8")) + len((part.content_type or "").encode("utf-8"))
+            for part in item.attachment_info
+        )
         + sum(len(value.encode("utf-8")) for value in item.provider_keywords)
         + sum(len(value.encode("utf-8")) for value in item.semantic_tags)
     )

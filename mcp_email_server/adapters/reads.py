@@ -87,6 +87,7 @@ class ClassicReadProvider:
                     date=email_data["date"],
                     body=email_data["body"],
                     attachments=email_data["attachments"],
+                    attachment_info=email_data.get("attachment_info") or [],
                     provider_keywords=[
                         flag
                         for flag in email_data.get("_flags", [])
@@ -122,6 +123,10 @@ class ClassicReadProvider:
                 + len(email.sender.encode("utf-8"))
                 + sum(len(value.encode("utf-8")) for value in email.recipients)
                 + sum(len(value.encode("utf-8")) for value in email.attachments)
+                + sum(
+                    len(item.filename.encode("utf-8")) + len((item.content_type or "").encode("utf-8"))
+                    for item in email.attachment_info
+                )
             )
             if aggregate_header_bytes > APPLICATION_LIMITS.aggregate_header_bytes:
                 raise ReadProviderError(
