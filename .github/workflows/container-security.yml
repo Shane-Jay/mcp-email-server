@@ -30,6 +30,8 @@ jobs:
       - name: Build runtime image from selected commit
         run: docker build --pull --tag mcp-email-server:security .
 
+      # Always write SARIF so the artifact is available even when the later
+      # gating scan fails the job. Do not set exit-code 1 here.
       - name: Scan runtime image
         uses: aquasecurity/trivy-action@v0.36.0
         with:
@@ -50,8 +52,25 @@ jobs:
           path: trivy-results.sarif
           if-no-files-found: error
 
+      # Private repos on GitHub Free have no code scanning. Skip unless the
+      # repo variable is set, and never fail the job on upload errors.
       - name: Upload vulnerability report
+        if: vars.ENABLE_CODE_SCANNING == 'true'
+        continue-on-error: true
         uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: trivy-results.sarif
           category: container-main-build
+
+      # Real gate: unfixed HIGH/CRITICAL findings fail the job after the
+      # SARIF artifact (and optional code-scanning upload) have run.
+      - name: Fail on unfixed HIGH or CRITICAL findings
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: mcp-email-server:security
+          scan-type: image
+          scanners: vuln
+          format: table
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"

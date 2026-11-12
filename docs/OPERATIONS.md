@@ -13,6 +13,14 @@ Do not put real credentials, tokens, or personal paths in git. Copy
 
 ## 1. Deploy on Synology Docker / Container Manager
 
+A reviewed NAS kit with Docker secrets, a Tailscale IP bind, and
+`scripts/smoke.sh` lives in `deploy/synology/` (see that directory's README).
+The steps below remain valid for a from-source compose using
+`docker-compose.example.yml`.
+
+群晖密钥版 compose 套件在仓库的 `deploy/synology/`（该目录 README 有逐步说明）。
+下面步骤仍适用于用根目录 `docker-compose.example.yml` 从源码构建。
+
 1. Copy this repository onto the NAS (or clone it into a shared folder).
 2. `cp env.example .env && chmod 600 .env`
 3. Fill in HTTP bearer token, cache key, `MCP_ALLOWED_HOSTS`, recipient

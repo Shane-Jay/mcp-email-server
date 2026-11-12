@@ -1,0 +1,87 @@
+# Optional overlay for /volume1/docker/mcp-email-server/data/config.toml.
+# The compose kit loads accounts from env.example (PRESET + PASSWORD_FILE).
+# Copy this file only if you want a TOML overlay. Do not put real passwords,
+# tokens, or authorization codes here — they belong in Docker secret files.
+
+credential_storage = "plaintext"
+
+# --- Account shapes matching the three env presets (commented) ---
+# Uncomment only if you switch off env accounts. Passwords still must come
+# from MCP_EMAIL_SERVER_ACCOUNT_<name>_PASSWORD or *_PASSWORD_FILE, not
+# from this file.
+#
+# 163 Mail (PRESET=163). Authorization code, not the web-mail password.
+# [[emails]]
+# account_name = "netease"
+# full_name = "163 Mail"
+# email_address = "you@163.com"
+# imap_id_mode = "always"
+# imap_search_mode = "local"
+# save_to_sent = true
+# allow_protocol_commands = false
+#
+# [emails.incoming]
+# user_name = "you@163.com"
+# # password via /run/secrets/netease_auth_code
+# host = "imap.163.com"
+# port = 993
+# use_ssl = true
+# start_ssl = false
+#
+# [emails.outgoing]
+# user_name = "you@163.com"
+# host = "smtp.163.com"
+# port = 465
+# use_ssl = true
+# start_ssl = false
+#
+# Aliyun enterprise mail (PRESET=aliyun).
+# [[emails]]
+# account_name = "aliyun"
+# full_name = "Aliyun Enterprise Mail"
+# email_address = "you@company.example"
+# imap_id_mode = "auto"
+# imap_search_mode = "server"
+# save_to_sent = true
+# allow_protocol_commands = false
+#
+# [emails.incoming]
+# user_name = "you@company.example"
+# # password via /run/secrets/aliyun_auth_code
+# host = "imap.qiye.aliyun.com"
+# port = 993
+# use_ssl = true
+# start_ssl = false
+#
+# [emails.outgoing]
+# user_name = "you@company.example"
+# host = "smtp.qiye.aliyun.com"
+# port = 465
+# use_ssl = true
+# start_ssl = false
+#
+# iCloud Mail (PRESET=icloud). App-specific password from appleid.apple.com.
+# SMTP is STARTTLS on 587, not implicit TLS 465.
+# [[emails]]
+# account_name = "icloud"
+# full_name = "iCloud Mail"
+# email_address = "you@icloud.com"
+# imap_id_mode = "auto"
+# imap_search_mode = "server"
+# save_to_sent = true
+# allow_protocol_commands = false
+#
+# [emails.incoming]
+# user_name = "you@icloud.com"
+# # password via /run/secrets/icloud_app_password
+# host = "imap.mail.me.com"
+# port = 993
+# use_ssl = true
+# start_ssl = false
+#
+# [emails.outgoing]
+# user_name = "you@icloud.com"
+# host = "smtp.mail.me.com"
+# port = 587
+# use_ssl = false
+# start_ssl = true

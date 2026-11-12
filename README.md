@@ -43,8 +43,10 @@ MCP_EMAIL_HTTP_BEARER_TOKEN=dev-token \
 ```
 
 Env accounts (163 / Aliyun / iCloud): see [env.example](env.example) and
-[docs/OPERATIONS.md](docs/OPERATIONS.md). Presets never include passwords —
-use each provider's IMAP authorization code, not the web login.
+[docs/OPERATIONS.md](docs/OPERATIONS.md). A reviewed Synology compose kit
+(Docker secrets, Tailscale bind, conservative tool list) is in
+`deploy/synology/`. Presets never include passwords — use each provider's
+IMAP authorization code, not the web login.
 
 ## Security notes
 
@@ -75,7 +77,7 @@ make test-e2e      # GreenMail (Docker compose, or Java standalone)
 
 ## Documentation
 
-- [Operations (EN/中文)](docs/OPERATIONS.md)
+- [Operations (EN/中文)](docs/OPERATIONS.md) · [Synology kit](deploy/synology/README.md)
 - [Configuration](docs/configuration.md) · [Providers](docs/providers.md)
 - [Tools](docs/tools.md) · [Transports](docs/transports.md) · [Security](docs/security.md)
 

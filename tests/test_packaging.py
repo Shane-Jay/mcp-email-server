@@ -283,6 +283,11 @@ def test_distribution_is_node_free_and_embeds_reproducible_ui(tmp_path: Path) ->
         ".pre-commit-config.yaml",
         "codecov.yaml",
         "Dockerfile",
+        "deploy/synology/docker-compose.yml",
+        "deploy/synology/env.example",
+        "deploy/synology/config.example.toml",
+        "deploy/synology/README.md",
+        "scripts/smoke.sh",
         "plugins/mcp-email-server/.codex-plugin/plugin.json",
         "plugins/mcp-email-server/.claude-plugin/plugin.json",
         "plugins/mcp-email-server/.mcp.json",
@@ -453,21 +458,38 @@ def test_container_security_workflow_scans_runtime_image_from_selected_commit() 
     build = next(step for step in steps if step.get("name") == "Build runtime image from selected commit")
     assert "if" not in build
     assert build["run"] == "docker build --pull --tag mcp-email-server:security ."
-    scan = next(step for step in steps if str(step.get("uses", "")).startswith("aquasecurity/trivy-action@"))
-    options = scan["with"]
-    assert options["image-ref"] == "mcp-email-server:security"
-    assert "wh1isper" not in options["image-ref"]
-    assert options["scan-type"] == "image"
-    assert options["scanners"] == "vuln"
-    assert options["severity"] == "HIGH,CRITICAL"
-    assert options["limit-severities-for-sarif"] is True
-    assert options["ignore-unfixed"] is True
-    assert options["exit-code"] == "0"
+    trivy_steps = [step for step in steps if str(step.get("uses", "")).startswith("aquasecurity/trivy-action@")]
+    assert len(trivy_steps) == 2
+    sarif = next(step for step in trivy_steps if step["with"]["format"] == "sarif")
+    gate = next(step for step in trivy_steps if step["with"]["format"] == "table")
+    sarif_options = sarif["with"]
+    gate_options = gate["with"]
+    for options in (sarif_options, gate_options):
+        assert options["image-ref"] == "mcp-email-server:security"
+        assert "wh1isper" not in options["image-ref"]
+        assert options["scan-type"] == "image"
+        assert options["scanners"] == "vuln"
+        assert options["severity"] == "HIGH,CRITICAL"
+        assert options["ignore-unfixed"] is True
+    assert sarif_options["limit-severities-for-sarif"] is True
+    assert sarif_options["exit-code"] == "0"
+    assert gate_options["exit-code"] == "1"
+    assert "if" not in gate
+    assert "continue-on-error" not in gate
     artifact = next(step for step in steps if step.get("name") == "Upload SARIF artifact")
     assert artifact["uses"] == "actions/upload-artifact@v4"
+    assert "if" not in artifact
     upload = next(step for step in steps if step.get("uses") == "github/codeql-action/upload-sarif@v4")
-    assert upload["with"]["sarif_file"] == options["output"]
+    assert upload["with"]["sarif_file"] == sarif_options["output"]
     assert upload["with"]["category"] == "container-main-build"
+    assert upload.get("continue-on-error") is True
+    condition = upload.get("if")
+    assert isinstance(condition, str)
+    assert "ENABLE_CODE_SCANNING" in condition
+    names = [step.get("name") for step in steps]
+    assert names.index("Scan runtime image") < names.index("Upload SARIF artifact")
+    assert names.index("Upload SARIF artifact") < names.index("Upload vulnerability report")
+    assert names.index("Upload vulnerability report") < names.index("Fail on unfixed HIGH or CRITICAL findings")
 
 
 def test_ci_and_release_use_the_same_exact_artifact_verification_path() -> None:

@@ -19,7 +19,7 @@ email without tying the client to a specific email provider.
 - [Security](security.md) — manage credentials, allowlists, TLS, and attachment access.
 - [Guides](guides.md) — configure IMAP-only accounts, ProtonMail Bridge, drafts, and replies.
 - [Troubleshooting](troubleshooting.md) — resolve common account, keyring, TLS, and transport problems.
-- [Operations](OPERATIONS.md) — Synology Docker deploy, token/cache-key rotation, provider auth codes.
+- [Operations](OPERATIONS.md) — Synology Docker deploy, token/cache-key rotation, provider auth codes. The reviewed secrets-based compose kit is `deploy/synology/` in the repository.
 
 ## Core capabilities
 

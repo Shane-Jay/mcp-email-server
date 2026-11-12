@@ -93,6 +93,8 @@ include = [
     "/.pre-commit-config.yaml",
     "/Dockerfile",
     "/docker-compose.example.yml",
+    "/deploy",
+    "/scripts",
     "/env.example",
     "/NOTICE",
     "/CHANGES-vs-upstream.md",
