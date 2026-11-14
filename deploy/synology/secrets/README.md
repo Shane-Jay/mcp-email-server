@@ -6,8 +6,9 @@ spaces, a single trailing newline is fine.
 Ownership and mode: owner = your DSM user, group = `users` (gid 100),
 file mode `640`, directory mode `750`. The container runs as `1000:1000`
 with `group_add: ["100"]` so it can read them. Do not chown these files
-to `1000:1000` or set mode `600` — an unreadable password file causes that
-account to be skipped with `incomplete configuration`.
+to `1000:1000` or set mode `600` — an unreadable password file skips only that
+account. The log names the `*_PASSWORD_FILE` variable and the path and does
+not include the file contents. Other accounts still load.
 
 | File                  | Contents                                     |
 | --------------------- | -------------------------------------------- |

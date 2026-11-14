@@ -31,6 +31,7 @@ from mcp_email_server.application.limits import (
 from mcp_email_server.application.mutations import InlineAttachment
 
 _MIME_TOKEN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]{0,126}\Z")
+_STRIPPED_FILENAME_CATEGORIES = frozenset({"Cc", "Cf", "Zl", "Zp"})
 _SHA256_HEX = re.compile(r"^[0-9a-f]{64}\Z")
 _MAX_FILENAME_BYTES = 255
 _PDF_MAGIC = b"%PDF-"
@@ -120,14 +121,19 @@ def decode_inline_attachments(
 
 
 def sanitize_attachment_filename(raw: str) -> str:
-    """Return one NFC basename without separators, NUL, or other controls."""
+    """Return one NFC basename without path separators or hidden controls.
 
-    text = unicodedata.normalize("NFC", raw).replace("\\", "/").replace(":", "/")
-    base = text.rsplit("/", 1)[-1]
+    Colons stay in the name as underscores so ``R12:30.pdf`` is not truncated
+    to ``30.pdf``. Format characters (bidi overrides, zero-width marks) and
+    line or paragraph separators are removed so they cannot hide the extension.
+    """
+
+    text = unicodedata.normalize("NFC", raw).replace("\\", "/")
+    base = text.rsplit("/", 1)[-1].replace(":", "_")
     cleaned = "".join(
         character
         for character in base
-        if character != "\x00" and unicodedata.category(character) != "Cc" and ord(character) != 0x7F
+        if unicodedata.category(character) not in _STRIPPED_FILENAME_CATEGORIES and ord(character) != 0x7F
     )
     cleaned = cleaned.strip().strip(".")
     if not cleaned or cleaned in {".", ".."}:

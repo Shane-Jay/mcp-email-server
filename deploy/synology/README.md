@@ -151,14 +151,15 @@ chmod 750 secrets
 ```
 
 A missing or empty secret file skips that account with `incomplete configuration`.
-An unreadable secret file (wrong owner, group, or mode) raises an error that
-names the `*_FILE` variable and the path, and does not include the file
-contents. The HTTP bearer token uses the same ownership and mode; an unreadable
-token file fails startup the same way.
+An unreadable account secret file (wrong owner, group, or mode, or a directory)
+also skips only that account. The log names the `*_FILE` variable and the path
+and does not include the file contents. Other accounts still load. An unreadable
+HTTP bearer token file still refuses to start the HTTP listener.
 
 密钥文件缺失或为空时，对应账户会被跳过，日志里出现 `incomplete configuration`。
-文件存在但读不了（属主、组或权限不对）会直接报错，错误里有环境变量名和路径，
-不会打出文件内容。Bearer 令牌用同样的属主和权限；读不了令牌文件时启动失败。
+账户密钥文件存在但读不了（属主、组、权限不对，或指到了目录）也只跳过该账户。
+日志里有环境变量名和路径，不会打出文件内容。其他账户照常加载。Bearer 令牌
+文件读不了时，HTTP 监听仍会拒绝启动。
 
 | File                          | Account | Preset   | Where to get it                              |
 | ----------------------------- | ------- | -------- | -------------------------------------------- |

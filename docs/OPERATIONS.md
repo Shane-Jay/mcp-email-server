@@ -36,7 +36,9 @@ compose using `docker-compose.example.yml`.
    permissions). For the Synology kit in `deploy/synology/`, secret files are
    owned by your DSM user, group `users` (gid 100), mode `640`, with
    `group_add: ["100"]` on the container — do not chown secrets to `1000:1000`.
-   An unreadable password file skips that account with `incomplete configuration`.
+   An unreadable password file skips only that account. The log names the
+   `*_FILE` variable and the path and does not include the file contents.
+   Other accounts still load.
 7. Point the MCP client at `http://<NAS-LAN-IP-or-hostname>:9557/mcp` with
    `Authorization: Bearer <token>`. LAN traffic is plain HTTP; prefer
    WireGuard or Synology Reverse Proxy (HTTPS).
@@ -52,8 +54,8 @@ in this container.
    `docker compose up -d --build`。
 6. 确认容器以 `1000:1000` 运行、根文件系统只读、`/healthz` 健康。`/data` 数据卷必须对 uid 1000 可写。
    `deploy/synology/` 套件里的密钥文件归 DSM 用户所有，组为 `users`（gid 100），权限 `640`，
-   容器带 `group_add: ["100"]`；不要把密钥 chown 成 `1000:1000`。读不到的密码文件会让该账户
-   被跳过，日志为 `incomplete configuration`。
+   容器带 `group_add: ["100"]`；不要把密钥 chown 成 `1000:1000`。读不到的密码文件只跳过该账户，
+   日志里有环境变量名和路径，不含文件内容；其他账户照常加载。
 7. 把 MCP 客户端指到 `http://<NAS 局域网 IP 或主机名>:9557/mcp`，请求头
    `Authorization: Bearer <令牌>`。局域网是明文 HTTP，优先走 WireGuard 或群晖反代 HTTPS。
 
@@ -225,22 +227,22 @@ stays under the 8 MiB result ceiling.
 
 ## 7. Troubleshooting
 
-| Symptom                                 | Check                                                                                                                                                                                                                      |
-| --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Container exits immediately             | HTTP started without a token, or `MCP_ACCESS_MODE=lan` with insecure/missing `MCP_ALLOWED_HOSTS`.                                                                                                                          |
-| `/healthz` OK, MCP client 401           | Missing or wrong `Authorization: Bearer`. Rotate with `MCP_EMAIL_HTTP_BEARER_TOKENS`.                                                                                                                                      |
-| MCP client 421/invalid Host             | Add the NAS LAN IP:port and hostname to `MCP_ALLOWED_HOSTS`.                                                                                                                                                               |
-| 163 LOGIN OK then idle failures         | Keep `PRESET=163` (`imap_id_mode=always`).                                                                                                                                                                                 |
-| 163 SEARCH returns nothing              | Expected; the 163 preset uses local header search on the metadata projection. The encrypted cache is not part of that path.                                                                                                |
-| `tool_unavailable`                      | Tool is denied (`MCP_EMAIL_SERVER_TOOL_DENY` / allowlist) or `email_command` without `allow_protocol_commands`.                                                                                                            |
-| `get_attachment_content` missing/denied | Needs **both** `MCP_EMAIL_SERVER_ENABLE_ATTACHMENT_CONTENT=true` (or TOML `enable_attachment_content`) **and** the tool in `TOOL_ALLOW` if that list is set. Clients that drop blobs should use `read_attachment` instead. |
-| `read_attachment` disabled              | Set `MCP_EMAIL_SERVER_ENABLE_ATTACHMENT_READ=true` or `enable_attachment_content=true`, and include the tool in `TOOL_ALLOW` when that list is set.                                                                        |
-| Inline attachment rejected              | `MCP_EMAIL_SERVER_ENABLE_INLINE_ATTACHMENTS` defaults to false. Base64 must be standard alphabet, with no whitespace and no `data:` prefix.                                                                                |
-| Send / reply / forward denied           | Empty recipient allowlist denies all. Set `MCP_EMAIL_SERVER_ALLOWED_RECIPIENTS`.                                                                                                                                           |
-| Attachment path rejected                | Outgoing files must sit inside `MCP_EMAIL_SERVER_ATTACHMENT_DIR`. Forwarded IMAP parts are not subject to that directory.                                                                                                  |
-| Draft still in Drafts after send_draft  | Default `MCP_EMAIL_SERVER_SEND_DRAFT=safe` keeps the draft unless a Sent copy was saved. Set `delete` or enable `save_to_sent`.                                                                                            |
-| Unreadable secret file                  | The error names the `*_FILE` variable and path and does not include the contents. A missing or empty file still skips that account (`incomplete configuration`).                                                           |
-| Read-only root FS write errors          | Data belongs on `/data` and `/tmp` (tmpfs). Do not write under `/app`.                                                                                                                                                     |
+| Symptom                                 | Check                                                                                                                                                                                                                                                                                |
+| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Container exits immediately             | HTTP started without a token, or `MCP_ACCESS_MODE=lan` with insecure/missing `MCP_ALLOWED_HOSTS`.                                                                                                                                                                                    |
+| `/healthz` OK, MCP client 401           | Missing or wrong `Authorization: Bearer`. Rotate with `MCP_EMAIL_HTTP_BEARER_TOKENS`.                                                                                                                                                                                                |
+| MCP client 421/invalid Host             | Add the NAS LAN IP:port and hostname to `MCP_ALLOWED_HOSTS`.                                                                                                                                                                                                                         |
+| 163 LOGIN OK then idle failures         | Keep `PRESET=163` (`imap_id_mode=always`).                                                                                                                                                                                                                                           |
+| 163 SEARCH returns nothing              | Expected; the 163 preset uses local header search on the metadata projection. The encrypted cache is not part of that path.                                                                                                                                                          |
+| `tool_unavailable`                      | Tool is denied (`MCP_EMAIL_SERVER_TOOL_DENY` / allowlist) or `email_command` without `allow_protocol_commands`.                                                                                                                                                                      |
+| `get_attachment_content` missing/denied | Needs **both** `MCP_EMAIL_SERVER_ENABLE_ATTACHMENT_CONTENT=true` (or TOML `enable_attachment_content`) **and** the tool in `TOOL_ALLOW` if that list is set. Clients that drop blobs should use `read_attachment` instead.                                                           |
+| `read_attachment` disabled              | Set `MCP_EMAIL_SERVER_ENABLE_ATTACHMENT_READ=true` or `enable_attachment_content=true`, and include the tool in `TOOL_ALLOW` when that list is set.                                                                                                                                  |
+| Inline attachment rejected              | `MCP_EMAIL_SERVER_ENABLE_INLINE_ATTACHMENTS` defaults to false. Base64 must be standard alphabet, with no whitespace and no `data:` prefix.                                                                                                                                          |
+| Send / reply / forward denied           | Empty recipient allowlist denies all. Set `MCP_EMAIL_SERVER_ALLOWED_RECIPIENTS`.                                                                                                                                                                                                     |
+| Attachment path rejected                | Outgoing files must sit inside `MCP_EMAIL_SERVER_ATTACHMENT_DIR`. Forwarded IMAP parts are not subject to that directory.                                                                                                                                                            |
+| Draft still in Drafts after send_draft  | Default `MCP_EMAIL_SERVER_SEND_DRAFT=safe` keeps the draft unless a Sent copy was saved. Set `delete` or enable `save_to_sent`.                                                                                                                                                      |
+| Unreadable account secret file          | That account is skipped. The log names the `*_FILE` variable and path and does not include the contents. Other accounts still load. A missing or empty file is the same skip (`incomplete configuration`). An unreadable HTTP bearer token file still refuses to start the listener. |
+| Read-only root FS write errors          | Data belongs on `/data` and `/tmp` (tmpfs). Do not write under `/app`.                                                                                                                                                                                                               |
 
 | 现象                            | 排查                                                                                                                                                |
 | ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |

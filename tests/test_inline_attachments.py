@@ -56,6 +56,9 @@ def test_filename_sanitization_strips_paths_controls_and_keeps_chinese() -> None
     assert sanitize_attachment_filename("报告.pdf") == "报告.pdf"
     assert len(sanitize_attachment_filename("a" * 400).encode("utf-8")) <= 255
     assert sanitize_attachment_filename("   ") == "attachment"
+    assert sanitize_attachment_filename("R12:30.pdf") == "R12_30.pdf"
+    assert sanitize_attachment_filename("\u202egpj.exe") == "gpj.exe"
+    assert sanitize_attachment_filename("a\u200bb\u2028c\u2029.txt") == "abc.txt"
 
 
 def test_duplicate_and_chinese_names_round_trip_through_mime() -> None:

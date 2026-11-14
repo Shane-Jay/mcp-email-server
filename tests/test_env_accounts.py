@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
-from mcp_email_server.config import EmailSettings
+import mcp_email_server.config as config_module
+from mcp_email_server.config import EmailSettings, clear_settings_cache, get_settings
 from mcp_email_server.env_accounts import collect_account_kwargs, iter_env_account_specs
+from mcp_email_server.log import logger
 from mcp_email_server.provider_presets import get_provider_preset
 
 
@@ -67,6 +71,39 @@ def test_netease_presets_default_save_to_sent_false_unless_explicit(monkeypatch:
     account = EmailSettings.from_env_kwargs(other)
     assert account is not None
     assert account.save_to_sent is True
+
+
+def test_unreadable_password_file_skips_only_that_account(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    good_secret = tmp_path / "good-secret"
+    good_secret.write_text("good-account-secret\n", encoding="utf-8")
+    bad_dir = tmp_path / "not-a-file"
+    bad_dir.mkdir()
+    monkeypatch.delenv("MCP_EMAIL_SERVER_EMAIL_ADDRESS", raising=False)
+    monkeypatch.delenv("MCP_EMAIL_SERVER_PASSWORD", raising=False)
+    monkeypatch.delenv("MCP_EMAIL_SERVER_PASSWORD_FILE", raising=False)
+    monkeypatch.setenv("MCP_EMAIL_SERVER_ACCOUNTS", "good,bad")
+    monkeypatch.setenv("MCP_EMAIL_SERVER_ACCOUNT_good_EMAIL_ADDRESS", "good@example.test")
+    monkeypatch.setenv("MCP_EMAIL_SERVER_ACCOUNT_good_PASSWORD_FILE", str(good_secret))
+    monkeypatch.setenv("MCP_EMAIL_SERVER_ACCOUNT_good_IMAP_HOST", "imap.example.test")
+    monkeypatch.setenv("MCP_EMAIL_SERVER_ACCOUNT_bad_EMAIL_ADDRESS", "bad@example.test")
+    monkeypatch.setenv("MCP_EMAIL_SERVER_ACCOUNT_bad_PASSWORD_FILE", str(bad_dir))
+    monkeypatch.setenv("MCP_EMAIL_SERVER_ACCOUNT_bad_IMAP_HOST", "imap.example.test")
+    monkeypatch.setattr(config_module, "CONFIG_PATH", tmp_path / "config.toml")
+    clear_settings_cache()
+    captured: list[str] = []
+    sink = logger.add(lambda message: captured.append(str(message.record["message"])), level="ERROR")
+    try:
+        specs = iter_env_account_specs()
+        loaded = [account.account_name for account in get_settings(reload=True).emails]
+    finally:
+        logger.remove(sink)
+        clear_settings_cache()
+    assert [item["account_name"] for item in specs] == ["good"]
+    assert loaded == ["good"]
+    logged = "\n".join(captured)
+    assert "MCP_EMAIL_SERVER_ACCOUNT_bad_PASSWORD_FILE" in logged
+    assert str(bad_dir) in logged
+    assert "good-account-secret" not in logged
 
 
 def test_unknown_preset_is_skipped(monkeypatch: pytest.MonkeyPatch):
