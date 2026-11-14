@@ -15,7 +15,7 @@ import json
 import os
 from collections.abc import Awaitable
 from dataclasses import dataclass
-from typing import Literal, TypeVar
+from typing import TYPE_CHECKING, Literal, TypeVar
 
 from mcp_email_server.application.limits import APPLICATION_LIMITS, validate_serialized_result
 from mcp_email_server.application.reads import (
@@ -25,7 +25,9 @@ from mcp_email_server.application.reads import (
     ReadProviderError,
     ReadProviderFactory,
 )
-from mcp_email_server.attachment_extract import ExtractedText, extract_attachment_text
+
+if TYPE_CHECKING:
+    from mcp_email_server.attachment_extract import ExtractedText
 
 AttachmentReadFormat = Literal["auto", "text", "base64", "info"]
 _DEFAULT_TEXT_CHARS = 20_000
@@ -190,6 +192,8 @@ async def build_attachment_read_result(
 
 
 async def _extract_with_timeout(content: bytes, mime_type: str, filename: str) -> ExtractedText:
+    from mcp_email_server.attachment_extract import extract_attachment_text
+
     timeout = extraction_timeout_seconds()
     try:
         async with asyncio.timeout(timeout):

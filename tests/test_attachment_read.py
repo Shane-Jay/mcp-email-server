@@ -319,7 +319,7 @@ async def test_extraction_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
         time.sleep(0.2)
 
     monkeypatch.setattr("mcp_email_server.attachment_read.extraction_timeout_seconds", lambda: 0.05)
-    monkeypatch.setattr("mcp_email_server.attachment_read.extract_attachment_text", _slow)
+    monkeypatch.setattr("mcp_email_server.attachment_extract.extract_attachment_text", _slow)
     with pytest.raises(ValueError, match="timed out"):
         await build_attachment_read_result(
             filename="a.txt",
