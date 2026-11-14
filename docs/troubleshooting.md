@@ -610,9 +610,21 @@ bridge rather than using the normal account password.
 
 ## Attachment content is unavailable to a remote MCP client
 
-`download_attachment` returns a path on the server machine. A ChatGPT app or
-other remote MCP client cannot read that path because it does not share the
-server filesystem. Enable the independent content-transfer mode instead:
+`download_attachment` returns a path on the server machine. A remote MCP client
+cannot read that path. If the client also drops embedded binary resources, do
+not rely on `get_attachment_content`. Enable `read_attachment` instead:
+
+```bash
+MCP_EMAIL_SERVER_ENABLE_ATTACHMENT_READ=true
+```
+
+If `MCP_EMAIL_SERVER_TOOL_ALLOW` is set, add `read_attachment`. Call it with
+`format=auto` for text, or `format=base64` when the note says there is no text
+layer. To send files back, set `MCP_EMAIL_SERVER_ENABLE_INLINE_ATTACHMENTS=true`
+and pass `attachments_inline`. After both paths are verified, `download_attachment`
+and `get_attachment_content` can be removed from `TOOL_ALLOW`.
+
+Clients that do keep embedded resources can still use content transfer:
 
 ```toml
 enable_attachment_content = true

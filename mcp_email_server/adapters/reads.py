@@ -40,6 +40,13 @@ from mcp_email_server.windows_security import (
 )
 
 
+def _env_flag(name: str) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return False
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
 class ClassicReadProvider:
     """Adapt classic IMAP reads without consulting global settings."""
 
@@ -464,6 +471,10 @@ class LocalReadBackend:
                 allowed_senders=tuple(resolved.settings.allowed_senders),
                 enable_attachment_download=resolved.settings.enable_attachment_download,
                 enable_attachment_content=resolved.settings.enable_attachment_content,
+                enable_attachment_read=(
+                    bool(getattr(resolved.settings, "enable_attachment_read", False))
+                    or _env_flag("MCP_EMAIL_SERVER_ENABLE_ATTACHMENT_READ")
+                ),
                 tag_registry=ImapKeywordRegistry.from_tags(resolved.account.tags),
             ),
         )

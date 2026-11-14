@@ -26,7 +26,17 @@ def test_attachments_from_mixed_pdf_bodystructure() -> None:
     structure, _ = _parse_imap_sexp(f"({_MIXED_PDF})")
     names, info = attachments_from_bodystructure(structure)
     assert names == ["note.pdf"]
-    assert info == [{"filename": "note.pdf", "size": 1234, "content_type": "application/pdf"}]
+    assert info == [{"filename": "note.pdf", "size": 1234 * 3 // 4, "content_type": "application/pdf"}]
+
+
+def test_base64_bodystructure_size_uses_three_quarter_estimate() -> None:
+    structure, _ = _parse_imap_sexp(
+        '(("APPLICATION" "PDF" ("NAME" "exact.pdf") NIL NIL "BASE64" 1200 NIL NIL NIL)'
+        '("TEXT" "PLAIN" ("NAME" "note.txt") NIL NIL "7BIT" 1200 NIL NIL NIL) "MIXED")'
+    )
+    _names, info = attachments_from_bodystructure(structure)
+    assert info[0]["size"] == 1200 * 3 // 4
+    assert info[1]["size"] == 1200
 
 
 def test_alternative_without_filename_is_not_an_attachment() -> None:
@@ -92,7 +102,9 @@ async def test_header_fetch_populates_attachment_info_from_bodystructure() -> No
     result = await client._batch_fetch_headers(imap, ["9"], include_flags=True)
 
     assert result["9"]["attachments"] == ["note.pdf"]
-    assert result["9"]["attachment_info"] == [{"filename": "note.pdf", "size": 1234, "content_type": "application/pdf"}]
+    assert result["9"]["attachment_info"] == [
+        {"filename": "note.pdf", "size": 1234 * 3 // 4, "content_type": "application/pdf"}
+    ]
     imap.uid.assert_awaited_once_with("fetch", "9", "(FLAGS BODY.PEEK[HEADER]<0.65537> BODYSTRUCTURE)")
 
 

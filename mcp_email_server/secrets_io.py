@@ -12,21 +12,44 @@ from pathlib import Path
 from mcp_email_server.log import register_secret
 
 
-def read_secret_file(path: str | os.PathLike[str]) -> str | None:
-    """Return the contents of a secret file, or None if it is missing/empty."""
+class SecretFileError(OSError):
+    """A configured secret file exists but cannot be read.
+
+    The message names the environment variable and path. It never includes the
+    file contents.
+    """
+
+
+def read_secret_file(path: str | os.PathLike[str], *, source_env: str | None = None) -> str | None:
+    """Return the contents of a secret file, or None if it is missing or empty.
+
+    Permission errors and other OS errors raise ``SecretFileError``. A missing
+    file is treated as unset so an optional secret can stay absent.
+    """
 
     file_path = Path(path)
     try:
         payload = file_path.read_bytes()
-    except OSError:
+    except FileNotFoundError:
         return None
+    except OSError as exc:
+        env_label = source_env or "the configured secret-file variable"
+        raise SecretFileError(
+            f"Cannot read secret file named by {env_label} at {file_path}: {type(exc).__name__}"
+        ) from None
     if payload.endswith(b"\r\n"):
         payload = payload[:-2]
     elif payload.endswith(b"\n") or payload.endswith(b"\r"):
         payload = payload[:-1]
     if not payload:
         return None
-    value = payload.decode("utf-8")
+    try:
+        value = payload.decode("utf-8")
+    except UnicodeDecodeError:
+        env_label = source_env or "the configured secret-file variable"
+        raise SecretFileError(
+            f"Cannot read secret file named by {env_label} at {file_path}: UnicodeDecodeError"
+        ) from None
     register_secret(value)
     return value
 
@@ -54,7 +77,7 @@ def read_secret_from_env(
     file_path = os.environ.get(file_env_name)
     if not file_path:
         return None
-    return read_secret_file(file_path)
+    return read_secret_file(file_path, source_env=file_env_name)
 
 
 def read_secret_list_from_env(
@@ -79,7 +102,7 @@ def read_secret_list_from_env(
     file_path = os.environ.get(file_env_name)
     if not file_path:
         return ()
-    payload = read_secret_file(file_path)
+    payload = read_secret_file(file_path, source_env=file_env_name)
     if payload is None:
         return ()
     values = tuple(line.strip() for line in payload.splitlines() if line.strip())

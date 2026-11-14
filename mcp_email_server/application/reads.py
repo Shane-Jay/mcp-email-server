@@ -3,7 +3,10 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Awaitable
 from dataclasses import dataclass, field
-from typing import Protocol, TypeVar
+from typing import TYPE_CHECKING, Protocol, TypeVar
+
+if TYPE_CHECKING:
+    from mcp_email_server.attachment_read import AttachmentTextService
 
 from pydantic import TypeAdapter
 
@@ -66,6 +69,7 @@ class ReadAccountSnapshot:
     allowed_senders: tuple[str, ...]
     enable_attachment_download: bool
     enable_attachment_content: bool = False
+    enable_attachment_read: bool = False
     tag_registry: ImapKeywordRegistry = field(default_factory=ImapKeywordRegistry)
 
 
@@ -463,6 +467,7 @@ class ReadServices:
     content: EmailContentService
     attachments: AttachmentDownloadService
     attachment_content: AttachmentContentService
+    attachment_text: AttachmentTextService
 
     @classmethod
     def compose(
@@ -473,9 +478,12 @@ class ReadServices:
         artifacts: ArtifactWriter,
         large_results: LargeResultWriter | None = None,
     ) -> ReadServices:
+        from mcp_email_server.attachment_read import AttachmentTextService as AttachmentTextServiceImpl
+
         return cls(
             mailboxes=MailboxDiscoveryService(accounts, providers),
             content=EmailContentService(accounts, providers, mark_read, large_results),
             attachments=AttachmentDownloadService(accounts, providers, artifacts),
             attachment_content=AttachmentContentService(accounts, providers),
+            attachment_text=AttachmentTextServiceImpl(accounts, providers),
         )

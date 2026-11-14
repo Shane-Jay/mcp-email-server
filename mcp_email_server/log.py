@@ -13,6 +13,7 @@ from loguru import logger as _raw_logger  # noqa: E402
 __all__ = [
     "log_provider_failure",
     "log_safe_failure",
+    "log_unreadable_secret_file",
     "logger",
     "register_secret",
     "sanitize_log_text",
@@ -113,6 +114,17 @@ def _redact_record(record: Any) -> None:
 
 
 logger = _raw_logger.patch(_redact_record)
+
+
+def log_unreadable_secret_file(account_label: str, detail: str) -> None:
+    """Log a skipped account whose secret file could not be read.
+
+    ``detail`` is the ``SecretFileError`` text: the env var, the path, and the
+    exception type. It must not include file contents. This uses the unpatched
+    logger so a ``*_FILE`` value is not redacted merely because it is a path.
+    """
+
+    _raw_logger.opt(exception=False).error("Skipping email account {!r}: {}", account_label, detail)
 
 
 def log_safe_failure(message: str, exc: BaseException) -> None:

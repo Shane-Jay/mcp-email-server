@@ -198,7 +198,7 @@ Every tool advertises reviewed MCP `readOnlyHint`, `destructiveHint`,
 | Tools                                                                                           | Read-only | Destructive | Idempotent | Open world |
 | ----------------------------------------------------------------------------------------------- | --------- | ----------- | ---------- | ---------- |
 | `list_available_accounts`, `list_allowed_recipients`, `list_allowed_senders`, `list_email_tags` | yes       | no          | yes        | no         |
-| `list_emails_metadata`, `list_mailboxes`, `get_attachment_content`                              | yes       | no          | yes        | yes        |
+| `list_emails_metadata`, `list_mailboxes`, `get_attachment_content`, `read_attachment`           | yes       | no          | yes        | yes        |
 | `get_emails_content`                                                                            | no        | no          | yes        | yes        |
 | `send_email`, `forward_email`, `save_draft`, `save_to_mailbox`                                  | no        | no          | no         | yes        |
 | `set_email_flags`, `set_email_tags`, `mark_emails_as_read`, `create_mailbox`                    | no        | no          | yes        | yes        |
@@ -457,6 +457,7 @@ Sends a message through the selected account's SMTP server. It supports:
 - To, CC, and BCC recipients.
 - Plain-text or HTML bodies.
 - Attachments from file paths available to the server process. Relative paths use the process working directory; absolute paths are recommended.
+- Optional `attachments_inline` base64 files when `MCP_EMAIL_SERVER_ENABLE_INLINE_ATTACHMENTS=true`. The same parameter exists on `reply_email` and `save_draft`. `forward_email` does not accept it. A clean send keeps the `Email sent successfully to ...` prefix and appends each inline file's decoded size and sha256.
 - `Reply-To`, `In-Reply-To`, and `References` headers.
 
 The tool is always present in the stable MCP catalog. The selected
@@ -524,15 +525,16 @@ as `utf8-append-unsupported` without changing the successful SMTP outcome.
 Replies to an existing message through `send_email`, so recipient allowlist,
 attachments, Sent-copy, and mutation grants stay the same.
 
-| Parameter      | Default  | Description                                                                |
-| -------------- | -------- | -------------------------------------------------------------------------- |
-| `account_name` | Required | Configured account identifier.                                             |
-| `email_id`     | Required | UID of the message to reply to.                                            |
-| `body`         | Required | Reply text placed above a quoted original (plain text unless `html=true`). |
-| `mailbox`      | `INBOX`  | Mailbox containing the original.                                           |
-| `reply_all`    | `false`  | If true, CC original To/Cc recipients except this account.                 |
-| `cc` / `bcc`   | None     | Extra recipients; still filtered by the allowlist.                         |
-| `attachments`  | None     | Extra local files from the attachment allowlist directory when configured. |
+| Parameter            | Default  | Description                                                                |
+| -------------------- | -------- | -------------------------------------------------------------------------- |
+| `account_name`       | Required | Configured account identifier.                                             |
+| `email_id`           | Required | UID of the message to reply to.                                            |
+| `body`               | Required | Reply text placed above a quoted original (plain text unless `html=true`). |
+| `mailbox`            | `INBOX`  | Mailbox containing the original.                                           |
+| `reply_all`          | `false`  | If true, CC original To/Cc recipients except this account.                 |
+| `cc` / `bcc`         | None     | Extra recipients; still filtered by the allowlist.                         |
+| `attachments`        | None     | Extra local files from the attachment allowlist directory when configured. |
+| `attachments_inline` | None     | Base64 files. Requires `MCP_EMAIL_SERVER_ENABLE_INLINE_ATTACHMENTS=true`.  |
 
 The subject is `Re: <original>` without stacking a second `Re:`. `In-Reply-To`
 and `References` are set from the original Message-ID. A missing Message-ID
@@ -881,6 +883,47 @@ attachment (such as `.mhtml`) exports its MIME content headers, boundary, and
 complete child tree. These structured exports are reserialized with CRLF line
 endings and may normalize MIME formatting; they are not byte-exact archival
 copies of the original wire representation.
+
+### `read_attachment`
+
+Reads one named attachment as JSON text. The result is a single text content
+item and never an embedded binary resource. Use it when the MCP client drops
+`EmbeddedResource` / blob contents and only `TextContent` survives.
+
+The tool is enabled when `enable_attachment_read=true` or
+`MCP_EMAIL_SERVER_ENABLE_ATTACHMENT_READ=true`. `enable_attachment_content=true`
+also enables it. If `MCP_EMAIL_SERVER_TOOL_ALLOW` is set, include
+`read_attachment` in that list. The sender allowlist applies, with the same
+before-and-after authority checks as `get_attachment_content`.
+
+`format` is `auto` (default), `text`, `base64`, or `info`. Every result includes
+`filename`, `mime_type`, decoded `size`, full-file `sha256`, and the resolved
+`format`.
+
+- `text` pages extracted characters. The default window is 20,000 characters and
+  the maximum is 100,000. `next_offset` is null at the end.
+- `base64` pages raw bytes. The default chunk is 3 MiB and the maximum is 4 MiB,
+  which stays under the 8 MiB serialized-result ceiling. Each chunk includes
+  `chunk_sha256`.
+- `info` is metadata and the full-file sha256 only.
+- `auto` returns text when a supported type has a non-empty text layer.
+  Otherwise it returns a note such as `no_text_layer` or `unsupported_type` and
+  tells the client to call again with `format=base64`.
+
+Supported extraction is PDF (page markers), DOCX (paragraphs and TSV tables),
+PPTX (slide markers and `[notes]`), XLSX (sheet markers and cached cell values),
+TXT/CSV/Markdown (UTF-8, GB18030, then Latin-1), HTML with scripts and styles
+removed, and EML via the standard-library parser. Legacy `.doc`/`.ppt`/`.xls`,
+images, and scanned PDFs return a note instead of text. Extracted text is
+untrusted external content. Extraction runs in a worker thread for at most
+`MCP_EMAIL_SERVER_ATTACHMENT_READ_TIMEOUT_SECONDS` (default 20). Office zip
+members are rejected when the uncompressed total exceeds 100 MiB or the
+compression ratio exceeds 100. Macros are not run and links are not followed.
+
+`get_attachment_content` and `download_attachment` are unchanged. After
+`read_attachment` and inline send have been verified, operators can leave
+`ENABLE_ATTACHMENT_DOWNLOAD` unset and remove `download_attachment` and
+`get_attachment_content` from `TOOL_ALLOW`.
 
 ### `get_attachment_content`
 

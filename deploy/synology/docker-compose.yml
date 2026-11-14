@@ -26,10 +26,8 @@ services:
       HOME: /data
       TMPDIR: /tmp
       MCP_EMAIL_SERVER_CONFIG_PATH: /data/config.toml
-      MCP_EMAIL_CACHE_DIR: /data/cache
       MCP_EMAIL_SERVER_ATTACHMENT_DIR: /data/attachments
       MCP_EMAIL_HTTP_BEARER_TOKEN_FILE: /run/secrets/http_bearer_token
-      MCP_EMAIL_CACHE_KEY_FILE: /run/secrets/cache_key
       MCP_EMAIL_SERVER_ACCOUNT_netease_PASSWORD_FILE: /run/secrets/netease_auth_code
       MCP_EMAIL_SERVER_ACCOUNT_aliyun_PASSWORD_FILE: /run/secrets/aliyun_auth_code
       MCP_EMAIL_SERVER_ACCOUNT_icloud_PASSWORD_FILE: /run/secrets/icloud_app_password
@@ -37,13 +35,11 @@ services:
       - "${MCP_BIND_IP:-0.0.0.0}:9557:9557"
     volumes:
       - ${MCP_DATA_DIR:-/volume1/docker/mcp-email-server/data}:/data
-      - ${MCP_CACHE_DIR:-/volume1/docker/mcp-email-server/cache}:/data/cache
       - ${MCP_ATTACHMENT_DIR:-/volume1/docker/mcp-email-server/attachments}:/data/attachments
     tmpfs:
       - /tmp:uid=1000,gid=1000,mode=1777
     secrets:
       - http_bearer_token
-      - cache_key
       - netease_auth_code
       - aliyun_auth_code
       - icloud_app_password
@@ -67,8 +63,6 @@ services:
 secrets:
   http_bearer_token:
     file: ${MCP_SECRETS_DIR:-./secrets}/http_bearer_token
-  cache_key:
-    file: ${MCP_SECRETS_DIR:-./secrets}/cache_key
   netease_auth_code:
     file: ${MCP_SECRETS_DIR:-./secrets}/netease_auth_code
   aliyun_auth_code:

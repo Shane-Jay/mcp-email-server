@@ -10,9 +10,9 @@ from __future__ import annotations
 import os
 from typing import Any
 
-from mcp_email_server.log import log_safe_failure, logger
+from mcp_email_server.log import log_safe_failure, log_unreadable_secret_file, logger
 from mcp_email_server.provider_presets import ProviderPreset, get_provider_preset, normalize_preset_name
-from mcp_email_server.secrets_io import read_secret_from_env
+from mcp_email_server.secrets_io import SecretFileError, read_secret_from_env
 
 _PREFIX = "MCP_EMAIL_SERVER_"
 _ACCOUNT_PREFIX = "MCP_EMAIL_SERVER_ACCOUNT_"
@@ -41,6 +41,8 @@ def _apply_preset(values: dict[str, Any], preset: ProviderPreset) -> dict[str, A
     values.setdefault("smtp_start_ssl", preset.smtp_start_ssl)
     values.setdefault("imap_id_mode", preset.imap_id_mode)
     values.setdefault("imap_search_mode", preset.imap_search_mode)
+    if preset.save_to_sent is not None:
+        values.setdefault("save_to_sent", preset.save_to_sent)
     return values
 
 
@@ -54,6 +56,11 @@ def collect_account_kwargs(prefix: str, *, account_name: str | None = None) -> d
 
     try:
         return _collect_account_kwargs(prefix, account_name=account_name)
+    except SecretFileError as exc:
+        # The exception text names the env var and path only. One bad file skips
+        # this account; other accounts still load.
+        log_unreadable_secret_file(account_name or prefix, str(exc))
+        return None
     except (ValueError, TypeError) as exc:
         log_safe_failure("Failed to parse email account environment variables", exc)
         return None

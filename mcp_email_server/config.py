@@ -651,6 +651,8 @@ class Settings(BaseSettings):
     db_location: str = CONFIG_PATH.with_name("db.sqlite3").as_posix()
     enable_attachment_download: bool = False
     enable_attachment_content: bool = False
+    enable_attachment_read: bool = False
+    enable_inline_attachments: bool = False
     allowed_mutations: list[MutationClass] = Field(default_factory=lambda: list(DEFAULT_ALLOWED_MUTATIONS))
     allowed_recipients: list[str] = []
     allowed_senders: list[str] = []
@@ -730,6 +732,12 @@ class Settings(BaseSettings):
             allowed_senders=self.allowed_senders,
             report_blocked_mutations=self.report_blocked_mutations,
         )
+        read_value = os.getenv("MCP_EMAIL_SERVER_ENABLE_ATTACHMENT_READ")
+        if read_value is not None:
+            self.enable_attachment_read = _parse_bool_env(read_value, False)
+        inline_value = os.getenv("MCP_EMAIL_SERVER_ENABLE_INLINE_ATTACHMENTS")
+        if inline_value is not None:
+            self.enable_inline_attachments = _parse_bool_env(inline_value, False)
         raw_mutations = os.getenv("MCP_EMAIL_SERVER_ALLOWED_MUTATIONS")
         if raw_mutations is not None:
             self.allowed_mutations = list(

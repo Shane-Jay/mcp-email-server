@@ -25,13 +25,11 @@ services:
       HOME: /data
       TMPDIR: /tmp
       MCP_EMAIL_SERVER_CONFIG_PATH: /data/config.toml
-      MCP_EMAIL_CACHE_DIR: /data/cache
       MCP_EMAIL_SERVER_ATTACHMENT_DIR: /data/attachments
     ports:
       - "9557:9557"
     volumes:
       - mcp-email-data:/data
-      - mcp-email-cache:/data/cache
       - mcp-email-attachments:/data/attachments
     tmpfs:
       - /tmp:uid=1000,gid=1000,mode=1777
@@ -57,5 +55,4 @@ services:
 
 volumes:
   mcp-email-data:
-  mcp-email-cache:
   mcp-email-attachments:

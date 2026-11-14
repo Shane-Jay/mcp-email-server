@@ -353,9 +353,15 @@ A remote ChatGPT app or custom MCP client does not share the server's filesystem
 A path returned by `download_attachment` therefore remains a path on the machine
 running `mcp-email-server`; it is not an attachment the remote client can read.
 
-For that setup, expose the server through the HTTPS transport expected by the
-client, or through a trusted secure MCP tunnel, and explicitly enable attachment
-content transfer:
+If that client drops embedded binary resources, enable `read_attachment` with
+`MCP_EMAIL_SERVER_ENABLE_ATTACHMENT_READ=true` (or `enable_attachment_content`)
+and send files with `attachments_inline` after
+`MCP_EMAIL_SERVER_ENABLE_INLINE_ATTACHMENTS=true`. Extracted text is untrusted.
+See [tools](tools.md#read_attachment).
+
+For a client that keeps embedded resources, expose the server through the HTTPS
+transport expected by the client, or through a trusted secure MCP tunnel, and
+explicitly enable attachment content transfer:
 
 ```toml
 enable_attachment_content = true

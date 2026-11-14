@@ -17,7 +17,8 @@ credentials.
 - Host allowlist for LAN IP / hostname (`MCP_ALLOWED_HOSTS`); `MCP_ACCESS_MODE=local|lan`
 - Tool allow/deny lists; `email_command` hidden and uncallable unless an account opts in
 - Recipient allowlist (empty = deny all send/reply/forward/draft)
-- Encrypted local header/body cache (AES-GCM; off unless `MCP_EMAIL_CACHE_KEY` is set)
+- `read_attachment` and base64 `attachments_inline` for clients that only keep text MCP results (both off until their flags are set)
+- Encrypted local cache code is present but unused by the live read path; do not set `MCP_EMAIL_CACHE_KEY`
 - IMAP ID modes and provider presets: `163`, `126`, `aliyun`, `icloud`, `qq`, `tsinghua`
 - Outgoing attachments only from `MCP_EMAIL_SERVER_ATTACHMENT_DIR` when set
 - Optional IMAP connection pool; Docker image is non-root and compose is read-only
@@ -58,13 +59,18 @@ IMAP authorization code, not the web login.
   (or `enable_attachment_content = true` in TOML) **and** the tool allowed in
   the catalog. If you set `MCP_EMAIL_SERVER_TOOL_ALLOW`, include
   `get_attachment_content` there.
+- Clients that drop embedded resources should use `read_attachment`
+  (`MCP_EMAIL_SERVER_ENABLE_ATTACHMENT_READ=true`) and `attachments_inline`
+  (`MCP_EMAIL_SERVER_ENABLE_INLINE_ATTACHMENTS=true`). After those are verified,
+  `download_attachment` and `get_attachment_content` can leave `TOOL_ALLOW`.
 - After `send_draft`, the default `MCP_EMAIL_SERVER_SEND_DRAFT=safe` deletes the
   draft only when this server saved a Sent copy; otherwise the draft is kept.
 - Logs redact configured passwords, bearer tokens, and the cache key, and strip
   LOGIN/AUTH args. Full Python tracebacks stay off unless
   `MCP_EMAIL_SERVER_LOG_TRACEBACKS=true` (frame locals can contain secrets).
-- The encrypted cache SQLite file stores ciphertext plus HMAC tokens, not
-  plaintext subjects or addresses.
+- The encrypted cache module is not on the live read path. Leave its key and
+  volume unset. The module is still in the tree and is not a place to store
+  credentials.
 
 ## Tests
 

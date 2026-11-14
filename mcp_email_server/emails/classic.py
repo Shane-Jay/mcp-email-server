@@ -1031,6 +1031,23 @@ def _imap_disposition(part: list[Any]) -> tuple[str | None, dict[str, str]]:
     return None, {}
 
 
+def _estimate_decoded_octet_size(encoded_octets: int, encoding: str | None) -> int:
+    """Estimate decoded bytes from IMAP body-fld-octets and body-fld-enc.
+
+    BODYSTRUCTURE reports the transfer-encoded size. Base64 stores 3 raw bytes
+    in 4 characters, so the decoded estimate is ``encoded * 3 // 4``. 7bit,
+    8bit, and binary sizes are already the decoded size. Quoted-printable has
+    no stable ratio, so its encoded size is left unchanged.
+    """
+
+    if encoded_octets < 0:
+        return 0
+    token = (encoding or "").strip().upper()
+    if token in {"BASE64", "B"}:
+        return encoded_octets * 3 // 4
+    return encoded_octets
+
+
 def _attachment_info_from_basic(part: list[Any]) -> dict[str, Any] | None:
     """Classify one non-multipart BODYSTRUCTURE leaf as an attachment, if any."""
     if len(part) < 2 or not isinstance(part[0], str) or not isinstance(part[1], str):
@@ -1041,7 +1058,9 @@ def _attachment_info_from_basic(part: list[Any]) -> dict[str, Any] | None:
     params = _imap_param_map(part[2] if len(part) > 2 else None)
     disposition, disposition_params = _imap_disposition(part)
     filename = disposition_params.get("FILENAME") or params.get("NAME")
-    size = part[6] if len(part) > 6 and isinstance(part[6], int) and part[6] >= 0 else None
+    encoded_size = part[6] if len(part) > 6 and isinstance(part[6], int) and part[6] >= 0 else None
+    encoding = part[5] if len(part) > 5 and isinstance(part[5], str) else None
+    size = None if encoded_size is None else _estimate_decoded_octet_size(encoded_size, encoding)
     is_message = main_type == "message" and sub_type == "rfc822"
     if disposition == "ATTACHMENT" or filename or is_message:
         return {
