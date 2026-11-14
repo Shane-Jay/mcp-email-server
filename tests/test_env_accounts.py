@@ -43,6 +43,32 @@ def test_password_file(monkeypatch: pytest.MonkeyPatch, tmp_path):
     assert account.incoming.host == "imap.163.com"
 
 
+def test_netease_presets_default_save_to_sent_false_unless_explicit(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("MCP_EMAIL_SERVER_EMAIL_ADDRESS", "user@163.com")
+    monkeypatch.setenv("MCP_EMAIL_SERVER_PASSWORD", "auth-code-16chars")
+    monkeypatch.setenv("MCP_EMAIL_SERVER_PRESET", "163")
+    implied = collect_account_kwargs("MCP_EMAIL_SERVER_")
+    assert implied is not None
+    assert implied["save_to_sent"] is False
+    monkeypatch.setenv("MCP_EMAIL_SERVER_SAVE_TO_SENT", "true")
+    explicit = collect_account_kwargs("MCP_EMAIL_SERVER_")
+    assert explicit is not None
+    assert explicit["save_to_sent"] is True
+    monkeypatch.delenv("MCP_EMAIL_SERVER_SAVE_TO_SENT")
+    monkeypatch.setenv("MCP_EMAIL_SERVER_PRESET", "126")
+    netease_126 = collect_account_kwargs("MCP_EMAIL_SERVER_")
+    assert netease_126 is not None
+    assert netease_126["save_to_sent"] is False
+    monkeypatch.setenv("MCP_EMAIL_SERVER_PRESET", "aliyun")
+    monkeypatch.setenv("MCP_EMAIL_SERVER_EMAIL_ADDRESS", "user@company.example")
+    other = collect_account_kwargs("MCP_EMAIL_SERVER_")
+    assert other is not None
+    assert "save_to_sent" not in other
+    account = EmailSettings.from_env_kwargs(other)
+    assert account is not None
+    assert account.save_to_sent is True
+
+
 def test_unknown_preset_is_skipped(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("MCP_EMAIL_SERVER_EMAIL_ADDRESS", "a@b.test")
     monkeypatch.setenv("MCP_EMAIL_SERVER_PASSWORD", "x")

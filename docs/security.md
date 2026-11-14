@@ -133,7 +133,8 @@ type and a sanitized message (LOGIN/AUTH arguments, SASL blobs, Authorization
 headers, and message bodies stripped). Python tracebacks stay off unless
 `MCP_EMAIL_SERVER_LOG_TRACEBACKS=true`, which can expose frame locals. `log_safe_failure`
 never attaches exception text. The encrypted
-cache SQLite index stores HMAC-SHA256 tokens for account and mailbox names;
+cache module is not used by the live MCP read path. If a key is still configured,
+its SQLite index stores HMAC-SHA256 tokens for account and mailbox names;
 subjects and addresses exist only inside AES-GCM ciphertext. The cache key itself
 is never logged. Outgoing `attachments` paths are `resolve(strict=True)` then
 `relative_to` the allowlist directory, so `..`, absolute paths, and symlinks that
@@ -388,6 +389,16 @@ fetch. Enabling `download_attachment` does not enable content transfer. Use the
 content mode for a trusted remote client, such as a ChatGPT app, that cannot read
 server-local paths. The complete encoded tool result remains subject to the
 existing global serialized-result ceiling.
+
+`read_attachment` is a separate text-only tool for clients that discard embedded
+resources. It returns extracted text or chunked base64, never an embedded blob.
+Extracted text is untrusted external content. The tool is off unless
+`enable_attachment_read` or `enable_attachment_content` is true, and it uses the
+same sender allowlist as content transfer. `attachments_inline` on send, reply,
+and save draft is off unless `MCP_EMAIL_SERVER_ENABLE_INLINE_ATTACHMENTS=true`.
+Those bytes are checked for length, standard base64, optional sha256, filename,
+and MIME type before account secrets are used for SMTP. The recipient allowlist
+still applies. Inline and path attachments share the count and size caps.
 
 ## Indexed metadata privacy
 

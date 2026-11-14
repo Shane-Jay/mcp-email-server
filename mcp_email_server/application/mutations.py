@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from collections.abc import Awaitable
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -9,6 +10,8 @@ from typing import Literal, Protocol, TypeVar, cast
 
 from mcp_email_server.application.limits import (
     APPLICATION_LIMITS,
+    attachment_byte_limit,
+    total_attachment_byte_limit,
     validate_controlled_string,
     validate_imap_uid,
     validate_optional_controlled_string,
@@ -669,11 +672,27 @@ def _validate_optional_html_body(html_body: str | None) -> None:
         raise ValueError(f"body exceeds {APPLICATION_LIMITS.body_bytes} bytes")
 
 
+def _per_file_attachment_limit() -> int:
+    """Honor a patched application limit unless the operator set an env cap."""
+
+    if os.getenv("MCP_EMAIL_SERVER_MAX_ATTACHMENT_BYTES") is None:
+        return APPLICATION_LIMITS.attachment_bytes
+    return attachment_byte_limit()
+
+
+def _total_attachment_limit() -> int:
+    if os.getenv("MCP_EMAIL_SERVER_MAX_TOTAL_ATTACHMENT_BYTES") is None:
+        return APPLICATION_LIMITS.total_attachment_bytes
+    return total_attachment_byte_limit()
+
+
 def _validate_inline_attachments(attachments: tuple[InlineAttachment, ...], *, file_count: int) -> None:
     if any(not isinstance(item, InlineAttachment) for item in attachments):
         raise ValueError("inline attachments must be InlineAttachment values")
     if file_count + len(attachments) > APPLICATION_LIMITS.attachments:
         raise ValueError(f"attachments must contain at most {APPLICATION_LIMITS.attachments} paths")
+    per_file = _per_file_attachment_limit()
+    total_limit = _total_attachment_limit()
     total_size = 0
     for item in attachments:
         validate_controlled_string(
@@ -689,11 +708,11 @@ def _validate_inline_attachments(attachments: tuple[InlineAttachment, ...], *, f
         if not isinstance(item.payload, (bytes, bytearray)):
             raise ValueError("inline attachment payload must be bytes")  # noqa: TRY004 - stable validation contract
         size = len(item.payload)
-        if size > APPLICATION_LIMITS.attachment_bytes:
-            raise ValueError(f"an attachment exceeds {APPLICATION_LIMITS.attachment_bytes} bytes")
+        if size > per_file:
+            raise ValueError(f"an attachment exceeds {per_file} bytes")
         total_size += size
-        if total_size > APPLICATION_LIMITS.total_attachment_bytes:
-            raise ValueError(f"attachments exceed {APPLICATION_LIMITS.total_attachment_bytes} bytes in total")
+        if total_size > total_limit:
+            raise ValueError(f"attachments exceed {total_limit} bytes in total")
 
 
 def _validate_draft_source(source: DraftSource) -> DraftSource:
@@ -726,18 +745,24 @@ def _validate_attachment_paths(attachments: tuple[str, ...]) -> None:
         )
 
 
-def _preflight_attachment_sizes(attachments: tuple[str, ...]) -> None:
+def _preflight_attachment_sizes(attachments: tuple[str, ...], *, inline_bytes: int = 0) -> None:
     """Bound attachment sizes from filesystem metadata before a provider effect.
 
     Callers invoke this only after account resolution, send capability, and
     recipient policy have accepted the request. A rejected request therefore
     never stats caller-supplied paths, which on Windows could otherwise open an
     SMB/WebDAV session for a UNC path the request was never allowed to use.
+    ``inline_bytes`` is the already-decoded size of base64 attachments so path
+    files and inline files share one total cap.
     """
 
     from mcp_email_server.attachment_paths import configured_attachment_dir, resolve_allowed_attachment_path
 
-    total_size = 0
+    per_file = _per_file_attachment_limit()
+    total_limit = _total_attachment_limit()
+    total_size = inline_bytes
+    if total_size > total_limit:
+        raise ValueError(f"attachments exceed {total_limit} bytes in total")
     allowlist_enabled = configured_attachment_dir() is not None
     for raw_path in attachments:
         if allowlist_enabled:
@@ -753,11 +778,11 @@ def _preflight_attachment_sizes(attachments: tuple[str, ...]) -> None:
         if not path.is_file():
             continue
         size = metadata.st_size
-        if size > APPLICATION_LIMITS.attachment_bytes:
-            raise ValueError(f"an attachment exceeds {APPLICATION_LIMITS.attachment_bytes} bytes")
+        if size > per_file:
+            raise ValueError(f"an attachment exceeds {per_file} bytes")
         total_size += size
-        if total_size > APPLICATION_LIMITS.total_attachment_bytes:
-            raise ValueError(f"attachments exceed {APPLICATION_LIMITS.total_attachment_bytes} bytes in total")
+        if total_size > total_limit:
+            raise ValueError(f"attachments exceed {total_limit} bytes in total")
 
 
 def _forwarded_subject(subject: str) -> str:
@@ -1203,7 +1228,10 @@ class SaveToMailboxService(_MutationWorkflow):
         access = self._open(account)
         require_append_permissions(access.account.allowed_mutations, command.flags)
         _validate_recipient_policy(command, access.account)
-        _preflight_attachment_sizes(command.attachments)
+        _preflight_attachment_sizes(
+            command.attachments,
+            inline_bytes=sum(len(item.payload) for item in command.inline_attachments),
+        )
         try:
             outcome = _validate_append_result(
                 await _bounded_provider_effect(access.provider.save_to_mailbox(command, access.account))
@@ -1251,7 +1279,10 @@ class SaveDraftService(_MutationWorkflow):
         if access.account.drafts_mailbox != account.drafts_mailbox:
             raise PermissionError("Draft mailbox authority changed; retry")
         _validate_recipient_policy(command, access.account)
-        _preflight_attachment_sizes(command.attachments)
+        _preflight_attachment_sizes(
+            command.attachments,
+            inline_bytes=sum(len(item.payload) for item in command.inline_attachments),
+        )
         append = DraftAppendCommand(**vars(command), mailbox=mailbox, flags=(r"\Draft",))
         try:
             outcome = _validate_append_result(
@@ -1448,7 +1479,10 @@ class SendService(_MutationWorkflow):
         require_mutation(access.account.allowed_mutations, "send")
         self._require_send_capability(access.account)
         _validate_recipient_policy(command, access.account)
-        _preflight_attachment_sizes(command.attachments)
+        _preflight_attachment_sizes(
+            command.attachments,
+            inline_bytes=sum(len(item.payload) for item in command.inline_attachments),
+        )
         try:
             delivery = _validate_delivery_result(
                 await _bounded_provider_effect(access.provider.send(command, access.account))

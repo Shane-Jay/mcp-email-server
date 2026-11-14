@@ -31,6 +31,9 @@ class ProviderPreset:
     imap_id_mode: ImapIdMode
     imap_search_mode: ImapSearchMode
     notes: str
+    # None leaves the account default. False is applied only when the user did
+    # not set save_to_sent explicitly.
+    save_to_sent: bool | None = None
 
 
 PROVIDER_PRESETS: dict[str, ProviderPreset] = {
@@ -50,8 +53,10 @@ PROVIDER_PRESETS: dict[str, ProviderPreset] = {
         notes=(
             "Use a 16-character authorization code, not the web-mail password. "
             "NetEase requires RFC 2971 IMAP ID after LOGIN even when CAPABILITY "
-            "omits ID. Server SEARCH is unreliable; local header search is the default."
+            "omits ID. Server SEARCH is unreliable; local header search is the default. "
+            "Sent mail is stored by the provider, so save_to_sent defaults to false."
         ),
+        save_to_sent=False,
     ),
     "126": ProviderPreset(
         name="126",
@@ -66,7 +71,8 @@ PROVIDER_PRESETS: dict[str, ProviderPreset] = {
         smtp_start_ssl=False,
         imap_id_mode="always",
         imap_search_mode="local",
-        notes="Same IMAP ID and authorization-code requirements as 163 Mail.",
+        notes="Same IMAP ID, authorization-code, and save_to_sent requirements as 163 Mail.",
+        save_to_sent=False,
     ),
     "aliyun": ProviderPreset(
         name="aliyun",

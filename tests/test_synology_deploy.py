@@ -18,7 +18,6 @@ import yaml
 _WILDCARD_BIND = "0.0.0.0"  # noqa: S104
 _TMPFS_PREFIX = "/tmp:"  # noqa: S108
 _BEARER_FILE = "/run/secrets/http_bearer_token"
-_CACHE_KEY_FILE = "/run/secrets/cache_key"
 _NETEASE_AUTH_MOUNT = "/run/secrets/netease_auth_code"
 _SMOKE_BEARER = "smoke-test-token"
 
@@ -78,17 +77,19 @@ def test_synology_compose_is_hardened_and_defaults_to_lan_bind() -> None:
     environment = service["environment"]
     assert isinstance(environment, dict)
     assert environment["MCP_EMAIL_HTTP_BEARER_TOKEN_FILE"] == _BEARER_FILE
-    assert environment["MCP_EMAIL_CACHE_KEY_FILE"] == _CACHE_KEY_FILE
+    assert "MCP_EMAIL_CACHE_KEY_FILE" not in environment
+    assert "MCP_EMAIL_CACHE_DIR" not in environment
     assert environment["MCP_EMAIL_SERVER_ACCOUNT_netease_PASSWORD_FILE"] == _NETEASE_AUTH_MOUNT
+    assert "/data/cache" not in joined
     secrets = service["secrets"]
     assert isinstance(secrets, list)
     assert set(secrets) >= {
         "http_bearer_token",
-        "cache_key",
         "netease_auth_code",
         "aliyun_auth_code",
         "icloud_app_password",
     }
+    assert "cache_key" not in secrets
     defined = compose["secrets"]
     assert isinstance(defined, dict)
     for name in secrets:

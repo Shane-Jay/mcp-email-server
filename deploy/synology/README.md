@@ -84,13 +84,12 @@ files and permissions are easier from SSH.
 用 SSH 登录群晖。后面可以用 Container Manager 导入项目，密钥文件和权限建议在 SSH 里做。
 
 ```bash
-sudo mkdir -p /volume1/docker/mcp-email-server/{data,cache,attachments}
+sudo mkdir -p /volume1/docker/mcp-email-server/{data,attachments}
 sudo mkdir -p /volume1/docker/mcp-email-server/app/secrets
 # Copy this deploy/synology directory into app/ (compose + env.example + secrets/).
 
 # Data dirs must be writable by the container user (uid 1000).
 sudo chown 1000:1000 /volume1/docker/mcp-email-server/data \
-  /volume1/docker/mcp-email-server/cache \
   /volume1/docker/mcp-email-server/attachments
 
 # Secret files are written by your DSM user and read by the container through
@@ -101,8 +100,10 @@ sudo chown "$(id -u):100" /volume1/docker/mcp-email-server/app/secrets
 sudo chmod 750 /volume1/docker/mcp-email-server/app/secrets
 ```
 
-Data, cache, and attachment bind mounts must be writable by uid 1000 (the
+Data and attachment bind mounts must be writable by uid 1000 (the
 commands above, or DSM: Control Panel → Shared Folder → Edit → Permissions).
+Do not mount a mail-cache directory. The encrypted cache code is unused by
+the live MCP read path.
 
 Secret files stay owned by your DSM user, group `users` (gid 100), mode `640`;
 the secrets directory is mode `750`. On typical DSM systems the admin uid is
@@ -110,23 +111,28 @@ not 1000 (often 1026 or similar); use `id -u` and group `users` rather than
 hard-coding a uid. The container can read those files because compose adds
 `group_add: ["100"]`.
 
-数据、缓存和附件目录必须对容器 uid 1000 可写。密钥文件归你的 DSM 用户所有，组为
+数据和附件目录必须对容器 uid 1000 可写。不要挂载邮件缓存目录：加密缓存代码
+没有接到当前的 MCP 读路径上。密钥文件归你的 DSM 用户所有，组为
 `users`（gid 100），文件权限 `640`，目录 `750`。不要把整个项目或 secrets 目录
 `chown` 成 `1000:1000`，也不要把 secrets 目录设为 `700`。compose 已加入
 `group_add: ["100"]`，容器才能以组成员身份读取这些文件。
 
-## 2. Generate token and cache key / 生成令牌和缓存密钥
+## 2. Generate the bearer token / 生成令牌
 
 ```bash
 cd /volume1/docker/mcp-email-server/app
 mkdir -p secrets
 umask 027
 openssl rand -hex 32 > secrets/http_bearer_token
-openssl rand -hex 32 > secrets/cache_key
-chown "$(id -u):100" secrets/http_bearer_token secrets/cache_key
-chmod 640 secrets/http_bearer_token secrets/cache_key
+chown "$(id -u):100" secrets/http_bearer_token
+chmod 640 secrets/http_bearer_token
 chmod 750 secrets
 ```
+
+Do not create a cache key. `MCP_EMAIL_CACHE_KEY` / `MCP_EMAIL_CACHE_KEY_FILE`
+are unused by the live read path.
+
+不要生成缓存密钥。当前读信路径不会使用 `MCP_EMAIL_CACHE_KEY`。
 
 ## 3. Provider authorization codes / 写入邮箱授权码
 
@@ -144,15 +150,15 @@ chmod 640 secrets/*
 chmod 750 secrets
 ```
 
-If a secret file is unreadable inside the container (wrong owner, group, or
-mode), that account is skipped with `incomplete configuration`. Check the
-container logs if an account is missing after startup. The HTTP bearer token
-and cache key use the same ownership and mode; those failures show up as
-auth or cache errors rather than a skipped account.
+A missing or empty secret file skips that account with `incomplete configuration`.
+An unreadable secret file (wrong owner, group, or mode) raises an error that
+names the `*_FILE` variable and the path, and does not include the file
+contents. The HTTP bearer token uses the same ownership and mode; an unreadable
+token file fails startup the same way.
 
-如果容器读不到某个密钥文件（属主、组或权限不对），对应账户会被跳过，日志里
-出现 `incomplete configuration`。启动后若缺账户，先查容器日志。Bearer 令牌
-和缓存密钥用同样的属主和权限；这两项读失败会表现为鉴权或缓存错误，而不是跳过账户。
+密钥文件缺失或为空时，对应账户会被跳过，日志里出现 `incomplete configuration`。
+文件存在但读不了（属主、组或权限不对）会直接报错，错误里有环境变量名和路径，
+不会打出文件内容。Bearer 令牌用同样的属主和权限；读不了令牌文件时启动失败。
 
 | File                          | Account | Preset   | Where to get it                              |
 | ----------------------------- | ------- | -------- | -------------------------------------------- |

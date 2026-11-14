@@ -25,8 +25,8 @@ compose using `docker-compose.example.yml`.
 
 1. Copy this repository onto the NAS (or clone it into a shared folder).
 2. `cp env.example .env && chmod 600 .env`
-3. Fill in HTTP bearer token, cache key, `MCP_ALLOWED_HOSTS`, recipient
-   allowlist, and at least one account (see below).
+3. Fill in the HTTP bearer token, `MCP_ALLOWED_HOSTS`, recipient allowlist,
+   and at least one account (see below). Do not set a mail-cache key.
 4. `cp docker-compose.example.yml docker-compose.yml`
 5. In Container Manager: **Project** → create from the folder that contains
    `docker-compose.yml`, or from SSH: `docker compose up -d --build`.
@@ -46,7 +46,7 @@ in this container.
 
 1. 把本仓库放到群晖共享目录。
 2. `cp env.example .env && chmod 600 .env`
-3. 填写 HTTP Bearer 令牌、缓存密钥、`MCP_ALLOWED_HOSTS`、收件人白名单和至少一个账号。
+3. 填写 HTTP Bearer 令牌、`MCP_ALLOWED_HOSTS`、收件人白名单和至少一个账号。不要设置邮件缓存密钥。
 4. `cp docker-compose.example.yml docker-compose.yml`
 5. 打开套件中心 **Container Manager** → **项目**，用该目录创建；或 SSH 执行
    `docker compose up -d --build`。
@@ -78,7 +78,7 @@ compose 默认 `lan` 在宿主机上发布 `0.0.0.0:9557`。DNS 重绑定防护�
 这样健康检查仍可用 `127.0.0.1`。不要在 NAS 上把 Host 设为 `*`。 `local` 模式把
 `MCP_BIND_IP` 设为 `127.0.0.1`。
 
-## 2. Generating tokens and the cache key
+## 2. Generating the bearer token
 
 HTTP will not listen unless a bearer token is set (or
 `MCP_EMAIL_HTTP_INSECURE=true`, which is for isolated development only).
@@ -86,31 +86,27 @@ HTTP will not listen unless a bearer token is set (or
 ```bash
 # HTTP bearer token (32+ random bytes, hex)
 python3 -c 'import secrets; print(secrets.token_hex(32))'
-
-# Encrypted-cache passphrase (any long random string; SHA-256 if not 64 hex chars)
-python3 -c 'import secrets; print(secrets.token_urlsafe(48))'
 ```
 
 Put the token in `MCP_EMAIL_HTTP_BEARER_TOKEN` (or a file referenced by
-`MCP_EMAIL_HTTP_BEARER_TOKEN_FILE` with mode `0600`). Put the cache secret in
-`MCP_EMAIL_CACHE_KEY` or `MCP_EMAIL_CACHE_KEY_FILE`. Leave the cache key unset
-to disable the cache.
+`MCP_EMAIL_HTTP_BEARER_TOKEN_FILE` with mode `0600`). Do not set
+`MCP_EMAIL_CACHE_KEY` or `MCP_EMAIL_CACHE_KEY_FILE`. The encrypted cache module
+is still in the tree, but the live MCP read path does not read or write it.
 
 未配置令牌时 HTTP 传输会拒绝启动（除非显式 `MCP_EMAIL_HTTP_INSECURE=true`，仅用于隔离开发）。
-用上面的命令生成长随机值。缓存密钥留空即关闭加密缓存。
+不要设置缓存密钥。当前读信路径不会使用加密缓存。
 
-## 3. Rotating tokens and the cache key
+## 3. Rotating the HTTP token
 
 **HTTP token.** Set `MCP_EMAIL_HTTP_BEARER_TOKENS=new-token,old-token`, restart,
 switch clients to `new-token`, then drop `old-token` and restart again. Both
 values are compared in constant time; either one authenticates during overlap.
 
-**Cache key.** Changing `MCP_EMAIL_CACHE_KEY` makes existing ciphertext
-undecryptable. Stop the container, wipe the cache volume (see below), set the
-new key, start again. Old rows are not migrated.
+There is no cache key to rotate for live reads. If an older deploy still has a
+cache volume, it can be removed; the running server will not miss it.
 
 **HTTP 令牌：** 把新旧令牌同时写入 `MCP_EMAIL_HTTP_BEARER_TOKENS`，重启，客户端切到新令牌后再删掉旧令牌。
-**缓存密钥：** 更换后旧密文无法解密。停容器、清空缓存卷、写入新密钥再启动。不会自动迁移。
+当前读信不使用缓存密钥。旧部署上的缓存卷可以删掉。
 
 ## 4. Adding an account
 
@@ -182,44 +178,69 @@ See [providers.md](providers.md) for QQ and Tsinghua Coremail.
 
 QQ 与清华 Coremail 见 [providers.md](providers.md)。
 
-## 6. Backup and wiping the encrypted cache
+## 6. The encrypted cache is not on the live read path
 
-The cache lives in the `mcp-email-cache` volume (`MCP_EMAIL_CACHE_DIR`, default
-`/data/cache`). The SQLite file `mail-cache.sqlite3` stores AES-GCM ciphertext
-and HMAC-SHA256 tokens for account/mailbox names. Subjects and addresses are
-not stored in plaintext. Credentials are never written.
+`mcp_email_server/encrypted_cache.py` and the helper functions in
+`emails/classic.py` can store AES-GCM header and body records. The MCP tools
+`list_emails_metadata` and `get_emails_content` do not call those helpers. They
+go through `ClassicReadProvider`, which fetches from IMAP (and the metadata
+projection) directly. Setting `MCP_EMAIL_CACHE_KEY` therefore does not speed up
+or change live reads. The module is intentionally left in the tree. Do not mount
+a cache volume or set the key in the Synology or example compose files.
 
-**Backup.** Stop the container, archive the volume or copy
-`/data/cache/mail-cache.sqlite3` plus the current cache key (without the key the
-file is useless). Restart.
+Local header search for the 163 preset uses the metadata projection, not this
+cache.
 
-**Wipe.** Stop the container, delete the cache volume or the sqlite file, start
-again. A mailbox UIDVALIDITY change also drops that mailbox's rows automatically.
+加密缓存代码还在，但 `list_emails_metadata` 和 `get_emails_content` 不会读写它。
+不要在群晖或示例 compose 里挂载缓存卷，也不要设置 `MCP_EMAIL_CACHE_KEY`。
+163 的本地搜索走元数据投影，不走这份缓存。
 
-缓存位于 `mcp-email-cache` 卷。SQLite 里只有密文和账号/邮箱名的 HMAC 令牌，没有明文主题或地址，也不会写口令。
-备份时停容器，复制 sqlite 文件和当前密钥（没有密钥文件无用）。清空时删除卷或文件后重启。UIDVALIDITY 变化会自动丢掉该邮箱的行。
+## 6a. Attachment read and inline send
 
-Local header search (`imap_search_mode=local`, used by the 163 preset) decrypts
-rows in process; it works while the cache is encrypted.
+For a remote client that only keeps text MCP results:
 
-163 的本地主题搜索会在进程内解密，加密缓存开启时仍然可用。
+```bash
+MCP_EMAIL_SERVER_ENABLE_ATTACHMENT_READ=true
+MCP_EMAIL_SERVER_ENABLE_INLINE_ATTACHMENTS=true
+```
+
+Add `read_attachment` to `MCP_EMAIL_SERVER_TOOL_ALLOW` when that list is set.
+`read_attachment` returns extracted text or chunked base64. `attachments_inline`
+on `send_email`, `reply_email`, and `save_draft` accepts standard base64.
+After both are verified, `ENABLE_ATTACHMENT_DOWNLOAD` can stay unset and
+`download_attachment` / `get_attachment_content` can leave `TOOL_ALLOW`.
+
+The application cap is 25 MiB decoded per file and 50 MiB combined. One 25 MiB
+file is about 33.3 MiB of JSON on the streamable HTTP request. This server does
+not add a smaller HTTP body limit. A Synology reverse proxy with nginx's default
+`client_max_body_size 1m` will reject anything larger until that limit is raised.
+Direct access to port 9557 is bounded by the 25 MiB cap. `read_attachment`
+base64 chunks default to 3 MiB raw and max out at 4 MiB raw so the JSON response
+stays under the 8 MiB result ceiling.
+
+远程客户端如果只保留文本结果，打开上面两个开关，并在设置了 `TOOL_ALLOW` 时加入
+`read_attachment`。验证通过后可以把 `download_attachment` 和
+`get_attachment_content` 移出允许列表。单附件上限 25 MiB（JSON 大约 33.3 MiB）。
+群晖反代若仍是 nginx 默认 1m，需要调大 `client_max_body_size`。
 
 ## 7. Troubleshooting
 
-| Symptom                                 | Check                                                                                                                                                        |
-| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Container exits immediately             | HTTP started without a token, or `MCP_ACCESS_MODE=lan` with insecure/missing `MCP_ALLOWED_HOSTS`.                                                            |
-| `/healthz` OK, MCP client 401           | Missing or wrong `Authorization: Bearer`. Rotate with `MCP_EMAIL_HTTP_BEARER_TOKENS`.                                                                        |
-| MCP client 421/invalid Host             | Add the NAS LAN IP:port and hostname to `MCP_ALLOWED_HOSTS`.                                                                                                 |
-| 163 LOGIN OK then idle failures         | Keep `PRESET=163` (`imap_id_mode=always`).                                                                                                                   |
-| 163 SEARCH returns nothing              | Expected; local search + encrypted cache. Confirm `MCP_EMAIL_CACHE_KEY` if you want the cache.                                                               |
-| `tool_unavailable`                      | Tool is denied (`MCP_EMAIL_SERVER_TOOL_DENY` / allowlist) or `email_command` without `allow_protocol_commands`.                                              |
-| `get_attachment_content` missing/denied | Needs **both** `MCP_EMAIL_SERVER_ENABLE_ATTACHMENT_CONTENT=true` (or TOML `enable_attachment_content`) **and** the tool in `TOOL_ALLOW` if that list is set. |
-| Send / reply / forward denied           | Empty recipient allowlist denies all. Set `MCP_EMAIL_SERVER_ALLOWED_RECIPIENTS`.                                                                             |
-| Attachment path rejected                | Outgoing files must sit inside `MCP_EMAIL_SERVER_ATTACHMENT_DIR`. Forwarded IMAP parts are not subject to that directory.                                    |
-| Draft still in Drafts after send_draft  | Default `MCP_EMAIL_SERVER_SEND_DRAFT=safe` keeps the draft unless a Sent copy was saved. Set `delete` or enable `save_to_sent`.                              |
-| Cache search empty after key change     | Wipe the cache; old ciphertext cannot be read with a new key.                                                                                                |
-| Read-only root FS write errors          | Data belongs on `/data` and `/tmp` (tmpfs). Do not write under `/app`.                                                                                       |
+| Symptom                                 | Check                                                                                                                                                                                                                      |
+| --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Container exits immediately             | HTTP started without a token, or `MCP_ACCESS_MODE=lan` with insecure/missing `MCP_ALLOWED_HOSTS`.                                                                                                                          |
+| `/healthz` OK, MCP client 401           | Missing or wrong `Authorization: Bearer`. Rotate with `MCP_EMAIL_HTTP_BEARER_TOKENS`.                                                                                                                                      |
+| MCP client 421/invalid Host             | Add the NAS LAN IP:port and hostname to `MCP_ALLOWED_HOSTS`.                                                                                                                                                               |
+| 163 LOGIN OK then idle failures         | Keep `PRESET=163` (`imap_id_mode=always`).                                                                                                                                                                                 |
+| 163 SEARCH returns nothing              | Expected; the 163 preset uses local header search on the metadata projection. The encrypted cache is not part of that path.                                                                                                |
+| `tool_unavailable`                      | Tool is denied (`MCP_EMAIL_SERVER_TOOL_DENY` / allowlist) or `email_command` without `allow_protocol_commands`.                                                                                                            |
+| `get_attachment_content` missing/denied | Needs **both** `MCP_EMAIL_SERVER_ENABLE_ATTACHMENT_CONTENT=true` (or TOML `enable_attachment_content`) **and** the tool in `TOOL_ALLOW` if that list is set. Clients that drop blobs should use `read_attachment` instead. |
+| `read_attachment` disabled              | Set `MCP_EMAIL_SERVER_ENABLE_ATTACHMENT_READ=true` or `enable_attachment_content=true`, and include the tool in `TOOL_ALLOW` when that list is set.                                                                        |
+| Inline attachment rejected              | `MCP_EMAIL_SERVER_ENABLE_INLINE_ATTACHMENTS` defaults to false. Base64 must be standard alphabet, with no whitespace and no `data:` prefix.                                                                                |
+| Send / reply / forward denied           | Empty recipient allowlist denies all. Set `MCP_EMAIL_SERVER_ALLOWED_RECIPIENTS`.                                                                                                                                           |
+| Attachment path rejected                | Outgoing files must sit inside `MCP_EMAIL_SERVER_ATTACHMENT_DIR`. Forwarded IMAP parts are not subject to that directory.                                                                                                  |
+| Draft still in Drafts after send_draft  | Default `MCP_EMAIL_SERVER_SEND_DRAFT=safe` keeps the draft unless a Sent copy was saved. Set `delete` or enable `save_to_sent`.                                                                                            |
+| Unreadable secret file                  | The error names the `*_FILE` variable and path and does not include the contents. A missing or empty file still skips that account (`incomplete configuration`).                                                           |
+| Read-only root FS write errors          | Data belongs on `/data` and `/tmp` (tmpfs). Do not write under `/app`.                                                                                                                                                     |
 
 | 现象                            | 排查                                                                                                                                                |
 | ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -227,7 +248,7 @@ rows in process; it works while the cache is encrypted.
 | `/healthz` 正常，MCP 客户端 401 | Bearer 缺失或错误。用 `MCP_EMAIL_HTTP_BEARER_TOKENS` 轮换。                                                                                         |
 | 客户端报 Host 无效              | 把 NAS 局域网 IP:端口和主机名加入 `MCP_ALLOWED_HOSTS`。                                                                                             |
 | 163 能 LOGIN 随后失败           | 保持 `PRESET=163`（始终发 IMAP ID）。                                                                                                               |
-| 163 SEARCH 为空                 | 预期行为；用本地搜索 + 加密缓存。                                                                                                                   |
+| 163 SEARCH 为空                 | 预期行为；163 预设走元数据投影上的本地搜索，不使用加密缓存。                                                                                        |
 | `tool_unavailable`              | 工具被 allow/deny 排除，或未给账号打开 `email_command`。                                                                                            |
 | `get_attachment_content` 不可用 | 需要同时打开 `MCP_EMAIL_SERVER_ENABLE_ATTACHMENT_CONTENT=true`（或 TOML `enable_attachment_content`），并在设置了 `TOOL_ALLOW` 时把该工具写进列表。 |
 | send_draft 后草稿还在           | 默认 `MCP_EMAIL_SERVER_SEND_DRAFT=safe`：只有成功写入已发送时才删草稿。需要的话设 `delete` 或打开 `save_to_sent`。                                  |

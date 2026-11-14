@@ -41,6 +41,8 @@ def _apply_preset(values: dict[str, Any], preset: ProviderPreset) -> dict[str, A
     values.setdefault("smtp_start_ssl", preset.smtp_start_ssl)
     values.setdefault("imap_id_mode", preset.imap_id_mode)
     values.setdefault("imap_search_mode", preset.imap_search_mode)
+    if preset.save_to_sent is not None:
+        values.setdefault("save_to_sent", preset.save_to_sent)
     return values
 
 

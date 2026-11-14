@@ -26,9 +26,13 @@ Explicit `IMAP_HOST`, `SMTP_PORT`, `IMAP_ID_MODE`, and similar variables overrid
 - wants a compact RFC 2971 `ID` after `LOGIN` even when `CAPABILITY` omits `ID`;
 - returns empty or incomplete `SEARCH` results for Subject/From/To.
 
-This tree defaults the 163 preset to `imap_id_mode=always` and
-`imap_search_mode=local`. Local search uses a metadata snapshot (and, when
-configured, the encrypted header cache) instead of trusting server SEARCH.
+This tree defaults the 163 and 126 presets to `imap_id_mode=always`,
+`imap_search_mode=local`, and `save_to_sent=false` when the account does not
+set `SAVE_TO_SENT` itself. An explicit `true` still wins. NetEase already keeps
+a copy of SMTP mail, so an extra IMAP append usually duplicates Sent.
+`yeah.net` is not a named preset; set `SAVE_TO_SENT=false` yourself for that
+host. Local search uses the metadata snapshot. The encrypted header cache is
+not consulted by the live read path.
 
 ## Aliyun enterprise
 

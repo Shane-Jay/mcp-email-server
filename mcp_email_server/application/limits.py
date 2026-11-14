@@ -50,6 +50,32 @@ _CANONICAL_IMAP_UID = re.compile(r"[1-9][0-9]*\Z")
 _MAX_METADATA_SNAPSHOT_ROWS = 100_000
 
 
+def attachment_byte_limit() -> int:
+    """Return the per-file attachment cap, optionally lowered by the environment.
+
+    ``MCP_EMAIL_SERVER_MAX_ATTACHMENT_BYTES`` cannot raise the built-in 25 MiB
+    ceiling. The same cap applies to path attachments and inline base64.
+    """
+
+    return _bounded_decimal_env(
+        "MCP_EMAIL_SERVER_MAX_ATTACHMENT_BYTES",
+        default=APPLICATION_LIMITS.attachment_bytes,
+        minimum=1,
+        maximum=APPLICATION_LIMITS.attachment_bytes,
+    )
+
+
+def total_attachment_byte_limit() -> int:
+    """Return the combined attachment cap, clamped to the built-in 50 MiB ceiling."""
+
+    return _bounded_decimal_env(
+        "MCP_EMAIL_SERVER_MAX_TOTAL_ATTACHMENT_BYTES",
+        default=APPLICATION_LIMITS.total_attachment_bytes,
+        minimum=1,
+        maximum=APPLICATION_LIMITS.total_attachment_bytes,
+    )
+
+
 def metadata_snapshot_row_limit() -> int:
     """Return the configured metadata-projection row ceiling.
 
